@@ -2043,77 +2043,7 @@ function getLoopCurvePoints(step, steps = ANIMATION_POINT_STEPS) {
     ],
   };
 }
-function getMixedHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POINT_STEPS) {
-  const startPoint = step.endPoint;
-  const endPoint =
-    nextStep.mode === "same"
-      ? nextStep.startPoint
-      : nextStep.bridgeStart;
 
-  if (!startPoint || !endPoint) {
-    return { points: [] };
-  }
-
-  const startVec = normalize(
-    startPoint.x - step.circle.cx,
-    startPoint.y - step.circle.cy
-  );
-
-  const outward = turnName === "Bracket" || turnName === "Counter";
-  const tipDepth = radius * 0.22;
-
-  const tip = {
-    x: startPoint.x + startVec.x * (outward ? tipDepth : -tipDepth),
-    y: startPoint.y + startVec.y * (outward ? tipDepth : -tipDepth),
-  };
-
-  const startTangent =
-    step.mode === "same"
-      ? tangentUnit(step.dir, step.endAngle)
-      : tangentUnit(step.dir, step.arcEndAngle);
-
-  let endDir;
-  if (nextStep.mode === "same") {
-    endDir = tangentUnit(nextStep.dir, nextStep.startAngle);
-  } else {
-    endDir = normalize(
-      nextStep.bridgeEnd.x - nextStep.bridgeStart.x,
-      nextStep.bridgeEnd.y - nextStep.bridgeStart.y
-    );
-  }
-
-  const startBend = radius * 0.24;
-  const endBend = radius * 0.20;
-
-  const c1 = {
-    x: startPoint.x + startTangent.x * startBend,
-    y: startPoint.y + startTangent.y * startBend,
-  };
-
-  const c2 = {
-    x: endPoint.x - endDir.x * endBend,
-    y: endPoint.y - endDir.y * endBend,
-  };
-
-  const pts = [];
-  const half = Math.max(1, Math.floor(steps / 2));
-
-  for (let i = 0; i <= half; i++) {
-    const t = i / half;
-    pts.push(quadraticPoint(startPoint, c1, tip, t));
-  }
-  for (let i = 1; i <= half; i++) {
-    const t = i / half;
-    pts.push(quadraticPoint(tip, c2, endPoint, t));
-  }
-
-  return {
-    tip,
-    startPoint,
-    endPoint,
-    points: pts,
-  };
-}
 function getSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POINT_STEPS) {
   const horn = getSwitchHornGeometry(step, nextStep, turnName === "Counter");
   const enterTan = tangentUnit(step.dir, horn.enterAngle);
@@ -2202,30 +2132,20 @@ function buildRenderSegments() {
     const startState = stepStates[i] || parseStateCode("LFO");
     const endState = stepStates[i + 1] || startState;
 
-    if (!step || !nextStep) continue;
-
-    const isSameSpecialTurn =
-      turn === "Three" || turn === "Bracket" || turn === "Loop";
-
-    const isSwitchSpecialTurn =
-      turn === "Rocker" || turn === "Counter";
-
     const sameSpecial =
-      isSameSpecialTurn &&
+      (turn === "Three" || turn === "Bracket" || turn === "Loop") &&
+      nextStep &&
       step.mode === "same" &&
       nextStep.mode === "same" &&
       nextStep.circle === step.circle;
 
     if (sameSpecial) {
-      const sameData =
-        turn === "Loop"
-          ? getLoopCurvePoints(step)
-          : getThreeHornCurvePoints(step, nextStep, turn);
+      const sameData = turn === "Loop"
+        ? getLoopCurvePoints(step)
+        : getThreeHornCurvePoints(step, nextStep, turn);
 
-      sameEndClipAngles[i] =
-        sameData.loop?.enterAngle ?? sameData.horn.enterAngle;
-      sameStartClipAngles[i + 1] =
-        sameData.loop?.exitAngle ?? sameData.horn.exitAngle;
+      sameEndClipAngles[i] = sameData.loop?.enterAngle ?? sameData.horn.enterAngle;
+      sameStartClipAngles[i + 1] = sameData.loop?.exitAngle ?? sameData.horn.exitAngle;
 
       boundarySegments[i] = {
         type: "special-same",
@@ -2233,21 +2153,21 @@ function buildRenderSegments() {
         turnIndex: i,
         foot: startState.foot,
         points: sameData.points,
-        stateSamples:
-          turn === "Loop"
-            ? buildConstantStateSamples(sameData.points, startState)
-            : buildTransitionStateSamples(
-                sameData.points,
-                startState,
-                endState,
-                0.5
-              ),
+        stateSamples: turn === "Loop"
+          ? buildConstantStateSamples(sameData.points, startState)
+          : buildTransitionStateSamples(
+              sameData.points,
+              startState,
+              endState,
+              0.5
+            ),
       };
       continue;
     }
 
     const switchSpecial =
-      isSwitchSpecialTurn &&
+      (turn === "Rocker" || turn === "Counter") &&
+      nextStep &&
       step.mode === "switch" &&
       nextStep.mode === "switch" &&
       step.toCircle === nextStep.fromCircle;
@@ -2272,23 +2192,19 @@ function buildRenderSegments() {
       continue;
     }
 
-    const mixedSpecial =
-      (
-        (turn === "Three" || turn === "Bracket") &&
-        ((step.mode === "same" && nextStep.mode === "switch") ||
-         (step.mode === "switch" && nextStep.mode === "same"))
-      ) ||
-      (
-        (turn === "Rocker" || turn === "Counter") &&
-        ((step.mode === "same" && nextStep.mode === "switch") ||
-         (step.mode === "switch" && nextStep.mode === "same"))
-      );
+    const mixedIntoSwitch =
+      (turn === "Rocker" || turn === "Counter") &&
+      nextStep &&
+      step.mode === "same" &&
+      nextStep.mode === "switch" &&
+      step.circle === nextStep.fromCircle;
 
-    if (mixedSpecial) {
-      const hornData = getMixedHornCurvePoints(step, nextStep, turn);
+    if (mixedIntoSwitch) {
+      const hornData = getSwitchHornCurvePoints(step, nextStep, turn);
+      sameEndClipAngles[i] = hornData.horn.enterAngle;
 
       boundarySegments[i] = {
-        type: "special-mixed",
+        type: "special-mixed-into-switch",
         turn,
         turnIndex: i,
         foot: startState.foot,
@@ -2301,6 +2217,41 @@ function buildRenderSegments() {
         ),
       };
       continue;
+    }
+
+    const mixedIntoSame =
+      (turn === "Three" || turn === "Bracket" || turn === "Loop") &&
+      nextStep &&
+      step.mode === "switch" &&
+      nextStep.mode === "same" &&
+      step.toCircle === nextStep.circle;
+
+    if (mixedIntoSame) {
+      const sameData = turn === "Loop"
+        ? getLoopCurvePoints(nextStep)
+        : getThreeHornCurvePoints(step, nextStep, turn);
+
+      if (turn === "Loop") {
+        sameStartClipAngles[i + 1] = sameData.loop.exitAngle;
+      } else {
+        sameStartClipAngles[i + 1] = sameData.horn.exitAngle;
+      }
+
+      boundarySegments[i] = {
+        type: "special-mixed-into-same",
+        turn,
+        turnIndex: i,
+        foot: startState.foot,
+        points: sameData.points,
+        stateSamples: turn === "Loop"
+          ? buildConstantStateSamples(sameData.points, startState)
+          : buildTransitionStateSamples(
+              sameData.points,
+              startState,
+              endState,
+              0.5
+            ),
+      };
     }
   }
 
@@ -2354,6 +2305,7 @@ function buildRenderSegments() {
 
   return segments;
 }
+
 /* =========================
    蜈ｨ菴灘叉譎よ緒逕ｻ
 ========================= */
