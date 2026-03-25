@@ -1,4 +1,4 @@
-﻿const STATES = [
+const STATES = [
   ["LFO", "左足フォアアウト"],
   ["LFI", "左足フォアイン"],
   ["RFO", "右足フォアアウト"],
@@ -22,6 +22,7 @@ const TURN_LABELS = {
   Loop: "ループターン",
   Mohawk: "モホーク",
   ChangeFoot: "チェンジフット",
+  ChangeFootSwitch: "円切替チェンジフット",
   ChangeEdge: "チェンジエッジ",
   Rocker: "ロッカー",
   Counter: "カウンター",
@@ -34,6 +35,7 @@ const TURN_TOKENS = {
   Loop: "LOOP",
   Mohawk: "MOHAWK",
   ChangeFoot: "CHANGE_FOOT",
+  ChangeFootSwitch: "CHANGE_FOOT_SWITCH",
   ChangeEdge: "CHANGE_EDGE",
   Rocker: "ROCKER",
   Counter: "COUNTER",
@@ -70,7 +72,7 @@ let gridRows = BASE_GRID_ROWS;
 let gridCols = BASE_GRID_COLS;
 const TURN_CANDIDATES = {
   "same-same": ["Three", "Bracket", "Loop", "Mohawk", "ChangeFoot"],
-  "switch-switch": ["ChangeEdge", "Rocker", "Counter", "Choctaw"],
+  "switch-switch": ["ChangeEdge", "ChangeFootSwitch", "Rocker", "Counter", "Choctaw"],
   "same-switch": ["ChangeEdge"],
   "switch-same": ["Skating"],
 };
@@ -80,7 +82,7 @@ const TURN_CANDIDATES = {
   switch = 蜀・ｒ螟峨∴繧・
 */
 const SAME_TURNS = ["Three", "Bracket", "Loop", "Mohawk", "ChangeFoot", "Skating"];
-const SWITCH_TURNS = ["ChangeEdge", "Rocker", "Counter", "Choctaw"];
+const SWITCH_TURNS = ["ChangeEdge", "ChangeFootSwitch", "Rocker", "Counter", "Choctaw"];
 const ANIMATION_SPEED = 0.2; // px per ms
 const TURN_SLOWDOWN_MULTIPLIER = 2.35;
 const canvas = document.getElementById("canvas");
@@ -93,6 +95,8 @@ const clearSequenceInputButton = document.getElementById("clearSequenceInput");
 const startStateEl = document.getElementById("startState");
 const manualStartStateEl = document.getElementById("manualStartState");
 const countEl = document.getElementById("count");
+const countDownButton = document.getElementById("countDown");
+const countUpButton = document.getElementById("countUp");
 const checkAllTurnsButton = document.getElementById("checkAllTurns");
 const clearAllTurnsButton = document.getElementById("clearAllTurns");
 const manualTurnListEl = document.getElementById("manualTurnList");
@@ -132,6 +136,18 @@ const MAX_CANVAS_ZOOM = 3.5;
 let activeInputMode = INPUT_MODES.RANDOM;
 let canvasZoom = 1;
 let pinchState = null;
+const mixedHornTuning = {
+  sameToSwitch: {
+    clipOffset: 0.30,
+    hornDepth: 0.23,
+    bend: 0.10,
+  },
+  switchToSame: {
+    clipOffset: 0.30,
+    hornDepth: 0.23,
+    bend: 0.27,
+  },
+};
 
 /* =========================
    UI
@@ -187,6 +203,16 @@ function setInputPanelCollapsed(collapsed) {
 
   inputPanelBodyEl.hidden = collapsed;
   toggleInputPanelButton.textContent = collapsed ? "展開" : "折り畳み";
+}
+
+function redrawCurrentView() {
+  if (animationFrameId !== null) {
+    playAnimation();
+    return;
+  }
+
+  resetCanvas();
+  drawSteps();
 }
 
 function createManualTurnSelect(turnName = "Three") {
@@ -837,6 +863,10 @@ function applyTurnState(prev, turnName) {
 
   switch (turnName) {
     case "Three":
+      next.edge = flipEdge(next.edge);
+      next.fb = flipFB(next.fb);
+      break;
+
     case "Bracket":
     case "Rocker":
     case "Counter":
@@ -855,6 +885,11 @@ function applyTurnState(prev, turnName) {
       break;
 
     case "ChangeFoot":
+      next.foot = flipFoot(next.foot);
+      next.edge = flipEdge(next.edge);
+      break;
+
+    case "ChangeFootSwitch":
       next.foot = flipFoot(next.foot);
       break;
 
@@ -958,7 +993,7 @@ function detectTurns(modes) {
     } else if (a === "switch" && b === "same") {
       candidates = ["Skating"].filter(turn => enabled.has(turn));
     } else if (a === "switch" && b === "switch") {
-      candidates = ["ChangeEdge", "Rocker", "Counter", "Choctaw"]
+      candidates = ["ChangeEdge", "ChangeFootSwitch", "Rocker", "Counter", "Choctaw"]
         .filter(turn => enabled.has(turn));
     }
 
@@ -1858,6 +1893,62 @@ function drawStartStateLabel(point) {
   ctx.restore();
 }
 
+function getTurnAnnotationText(turn) {
+  if (turn === "Mohawk") return "M";
+  if (turn === "Choctaw") return "C";
+  return "";
+}
+
+function getTurnAnnotationPoint(turnIndex, segments) {
+  const labeledSegment = segments.find(segment =>
+    segment.turnIndex === turnIndex &&
+    segment.turn &&
+    segment.points?.length
+  );
+  if (labeledSegment) {
+    return getInterpolatedPoint(labeledSegment.points, 0.5);
+  }
+
+  const currentStep = stepInfos[turnIndex];
+  const nextStep = stepInfos[turnIndex + 1];
+  if (!currentStep || !nextStep) return null;
+
+  if (nextStep.mode === "same") {
+    return nextStep.startPoint;
+  }
+
+  if (currentStep.mode === "switch") {
+    return currentStep.arcEndPoint;
+  }
+
+  return currentStep.endPoint;
+}
+
+function drawTurnAnnotations(segments) {
+  if (!segments?.length || !turns?.length) return;
+
+  for (let i = 0; i < turns.length; i++) {
+    const label = getTurnAnnotationText(turns[i]);
+    if (!label) continue;
+
+    const point = getTurnAnnotationPoint(i, segments);
+    if (!point) continue;
+
+    ctx.save();
+    ctx.font = `700 ${Math.max(14, radius * 0.22)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffd84d";
+    ctx.strokeStyle = "rgba(11,16,32,0.92)";
+    ctx.lineWidth = Math.max(3, radius * 0.05);
+    ctx.shadowColor = "rgba(0,0,0,0.3)";
+    ctx.shadowBlur = radius * 0.08;
+    ctx.strokeText(label, point.x, point.y);
+    ctx.fillText(label, point.x, point.y);
+    ctx.restore();
+  }
+}
+
 /* =========================
    迚ｹ谿翫ち繝ｼ繝ｳ・医ヤ繝趣ｼ・
 ========================= */
@@ -2044,6 +2135,79 @@ function getLoopCurvePoints(step, steps = ANIMATION_POINT_STEPS) {
   };
 }
 
+function getLoopStartGeometry(step) {
+  const joint = step.startPoint;
+  const inward = normalize(step.circle.cx - joint.x, step.circle.cy - joint.y);
+  const tangent = tangentUnit(step.dir, step.startAngle);
+  const centerAngle = Math.atan2(joint.y - step.circle.cy, joint.x - step.circle.cx);
+  const clipOffset = radius * mixedHornTuning.switchToSame.clipOffset;
+  const loopRadius = radius * 0.22;
+
+  let enterAngle;
+  let exitAngle;
+
+  if (step.dir === "cw") {
+    enterAngle = centerAngle - clipOffset / radius;
+    exitAngle = centerAngle + clipOffset / radius;
+  } else {
+    enterAngle = centerAngle + clipOffset / radius;
+    exitAngle = centerAngle - clipOffset / radius;
+  }
+
+  const enterPoint = pointOnCircle(step.circle, enterAngle);
+  const exitPoint = pointOnCircle(step.circle, exitAngle);
+  const loopCenter = {
+    x: joint.x + inward.x * loopRadius * 1.08 - tangent.x * loopRadius * 0.16,
+    y: joint.y + inward.y * loopRadius * 1.08 - tangent.y * loopRadius * 0.16,
+  };
+  const loopStartAngle = Math.atan2(
+    joint.y - loopCenter.y,
+    joint.x - loopCenter.x
+  );
+
+  return {
+    joint,
+    enterAngle,
+    exitAngle,
+    enterPoint,
+    exitPoint,
+    loopCenter,
+    loopRadius,
+    loopStartAngle,
+  };
+}
+
+function getLoopStartCurvePoints(step, steps = ANIMATION_POINT_STEPS) {
+  const loop = getLoopStartGeometry(step);
+  const enterMid = {
+    x: lerp(loop.enterPoint.x, loop.joint.x, 0.5),
+    y: lerp(loop.enterPoint.y, loop.joint.y, 0.5),
+  };
+  const exitMid = {
+    x: lerp(loop.joint.x, loop.exitPoint.x, 0.5),
+    y: lerp(loop.joint.y, loop.exitPoint.y, 0.5),
+  };
+
+  const bridgeIn = sampleQuadraticCurvePoints(loop.enterPoint, enterMid, loop.joint, steps);
+  const loopCircle = sampleLoopCirclePoints(
+    loop.loopCenter,
+    loop.loopRadius,
+    loop.loopStartAngle,
+    step.dir,
+    steps * 2
+  );
+  const bridgeOut = sampleQuadraticCurvePoints(loop.joint, exitMid, loop.exitPoint, steps);
+
+  return {
+    loop,
+    points: [
+      ...bridgeIn,
+      ...loopCircle.slice(1),
+      ...bridgeOut.slice(1),
+    ],
+  };
+}
+
 function getSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POINT_STEPS) {
   const horn = getSwitchHornGeometry(step, nextStep, turnName === "Counter");
   const enterTan = tangentUnit(step.dir, horn.enterAngle);
@@ -2078,6 +2242,144 @@ function getSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_PO
   }
 
   return { horn, points: pts };
+}
+
+function getSameToSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POINT_STEPS) {
+  const clipOffset = radius * mixedHornTuning.sameToSwitch.clipOffset;
+  const enterAngle =
+    step.dir === "cw"
+      ? step.endAngle - clipOffset / radius
+      : step.endAngle + clipOffset / radius;
+  const startPoint = pointOnCircle(step.circle, enterAngle);
+  const joint = step.endPoint;
+  const inward = normalize(step.circle.cx - joint.x, step.circle.cy - joint.y);
+  const normal = turnName === "Counter"
+    ? { x: -inward.x, y: -inward.y }
+    : inward;
+  const endPoint = nextStep.bridgeStart;
+  const enterTan = tangentUnit(step.dir, enterAngle);
+  const exitDir = normalize(
+    nextStep.bridgeEnd.x - nextStep.bridgeStart.x,
+    nextStep.bridgeEnd.y - nextStep.bridgeStart.y
+  );
+  const hornDepth = radius * mixedHornTuning.sameToSwitch.hornDepth;
+  const bend = radius * mixedHornTuning.sameToSwitch.bend;
+  const c1 = {
+    x: startPoint.x + enterTan.x * bend,
+    y: startPoint.y + enterTan.y * bend,
+  };
+  const c2 = {
+    x: endPoint.x - exitDir.x * bend,
+    y: endPoint.y - exitDir.y * bend,
+  };
+  const tip = {
+    x: joint.x + normal.x * hornDepth,
+    y: joint.y + normal.y * hornDepth,
+  };
+
+  const pts = [];
+  const half = Math.max(1, Math.floor(steps / 2));
+  for (let i = 0; i <= half; i++) {
+    const t = i / half;
+    pts.push(quadraticPoint(startPoint, c1, tip, t));
+  }
+  for (let i = 1; i <= half; i++) {
+    const t = i / half;
+    pts.push(quadraticPoint(tip, c2, endPoint, t));
+  }
+
+  return {
+    sameEndAngle: enterAngle,
+    points: pts,
+  };
+}
+
+function getSwitchToSameHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POINT_STEPS) {
+  const clipOffset = radius * mixedHornTuning.switchToSame.clipOffset;
+  const centerAngle = nextStep.startAngle;
+  const enterAngle =
+    step.dir === "cw"
+      ? centerAngle - clipOffset / radius
+      : centerAngle + clipOffset / radius;
+  const exitAngle =
+    nextStep.dir === "cw"
+      ? centerAngle + clipOffset / radius
+      : centerAngle - clipOffset / radius;
+  const startPoint = pointOnCircle(step.toCircle, enterAngle);
+  const joint = nextStep.startPoint;
+  const inward = normalize(nextStep.circle.cx - joint.x, nextStep.circle.cy - joint.y);
+  const normal = turnName === "Bracket"
+    ? { x: -inward.x, y: -inward.y }
+    : inward;
+  const endPoint = pointOnCircle(nextStep.circle, exitAngle);
+  const enterTan = tangentUnit(step.dir, enterAngle);
+  const exitTan = tangentUnit(nextStep.dir, exitAngle);
+  const hornDepth = radius * mixedHornTuning.switchToSame.hornDepth;
+  const bend = radius * mixedHornTuning.switchToSame.bend;
+  const c1 = {
+    x: startPoint.x + enterTan.x * bend,
+    y: startPoint.y + enterTan.y * bend,
+  };
+  const c2 = {
+    x: endPoint.x - exitTan.x * bend,
+    y: endPoint.y - exitTan.y * bend,
+  };
+  const tip = {
+    x: joint.x + normal.x * hornDepth,
+    y: joint.y + normal.y * hornDepth,
+  };
+
+  const pts = [];
+  const half = Math.max(1, Math.floor(steps / 2));
+  for (let i = 0; i <= half; i++) {
+    const t = i / half;
+    pts.push(quadraticPoint(startPoint, c1, tip, t));
+  }
+  for (let i = 1; i <= half; i++) {
+    const t = i / half;
+    pts.push(quadraticPoint(tip, c2, endPoint, t));
+  }
+
+  return {
+    switchEndAngle: enterAngle,
+    sameStartAngle: exitAngle,
+    points: pts,
+  };
+}
+
+function getMixedHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POINT_STEPS) {
+  if (step.mode === "same" && nextStep.mode === "switch") {
+    return getSameToSwitchHornCurvePoints(step, nextStep, turnName, steps);
+  }
+
+  if (step.mode === "switch" && nextStep.mode === "same") {
+    return getSwitchToSameHornCurvePoints(step, nextStep, turnName, steps);
+  }
+
+  return { points: [] };
+}
+
+function isSameToSwitchSpecialTurn(turn) {
+  return turn === "Rocker" || turn === "Counter";
+}
+
+function isSwitchToSameSpecialTurn(turn) {
+  return turn === "Three" || turn === "Bracket" || turn === "Loop";
+}
+
+function isPlainSwitchToSameTurn(turn) {
+  return turn === "Mohawk" || turn === "ChangeFoot" || turn === "Skating";
+}
+
+function changeCountBy(delta) {
+  if (!countEl) return;
+
+  const min = Number(countEl.min || 1);
+  const max = Number(countEl.max || 50);
+  const current = Number(countEl.value || min);
+  const next = Math.max(min, Math.min(max, current + delta));
+  countEl.value = String(next);
+  saveSettingsToCookie();
 }
 
 /* =========================
@@ -2189,6 +2491,79 @@ function buildRenderSegments() {
           0.5
         ),
       };
+      continue;
+    }
+
+    const sameToSwitchSpecial =
+      nextStep &&
+      step.mode === "same" &&
+      nextStep.mode === "switch" &&
+      isSameToSwitchSpecialTurn(turn);
+
+    if (sameToSwitchSpecial) {
+      const hornData = getMixedHornCurvePoints(step, nextStep, turn);
+      if (hornData.sameEndAngle != null) {
+        sameEndClipAngles[i] = hornData.sameEndAngle;
+      }
+      boundarySegments[i] = {
+        type: "special-mixed",
+        turn,
+        turnIndex: i,
+        foot: startState.foot,
+        points: hornData.points,
+        stateSamples: buildTransitionStateSamples(
+          hornData.points,
+          startState,
+          endState,
+          0.5
+        ),
+      };
+      continue;
+    }
+
+    const switchToSameSpecial =
+      nextStep &&
+      step.mode === "switch" &&
+      nextStep.mode === "same" &&
+      isSwitchToSameSpecialTurn(turn);
+
+    if (switchToSameSpecial) {
+      const boundaryData = turn === "Loop"
+        ? getLoopStartCurvePoints(nextStep)
+        : getSwitchToSameHornCurvePoints(step, nextStep, turn);
+      if (turn === "Loop") {
+        switchEndClipAngles[i] = boundaryData.loop.enterAngle;
+        sameStartClipAngles[i + 1] = boundaryData.loop.exitAngle;
+      } else {
+        switchEndClipAngles[i] = boundaryData.switchEndAngle;
+        sameStartClipAngles[i + 1] = boundaryData.sameStartAngle;
+      }
+
+      boundarySegments[i] = {
+        type: "special-mixed",
+        turn,
+        turnIndex: i,
+        foot: startState.foot,
+        points: boundaryData.points,
+        stateSamples: buildTransitionStateSamples(
+          boundaryData.points,
+          startState,
+          endState,
+          0.5
+        ),
+      };
+      continue;
+    }
+
+    const plainSwitchToSame =
+      nextStep &&
+      step.mode === "switch" &&
+      nextStep.mode === "same" &&
+      isPlainSwitchToSameTurn(turn);
+
+    if (plainSwitchToSame) {
+      switchEndClipAngles[i] = nextStep.startAngle;
+      continue;
     }
   }
 
@@ -2224,14 +2599,17 @@ function buildRenderSegments() {
 
     const a = clippedStepPoints[i][clippedStepPoints[i].length - 1];
     const b = clippedStepPoints[i + 1][0];
-
+    const currentStep = stepInfos[i];
+    const nextStep = stepInfos[i + 1];
+    const turn = turns[i];
+    const currentState = stepStates[i] || state;
+    const nextState = stepStates[i + 1] || currentState;
     if (a && b && distance(a, b) >= 0.5) {
       const connectorPoints = sampleLinePoints(a, b);
-      const nextState = stepStates[i + 1] || state;
 
       segments.push({
         type: "connector",
-        turn: turns[i],
+        turn,
         turnIndex: i,
         foot: nextState.foot,
         points: connectorPoints,
@@ -2253,6 +2631,7 @@ function drawSteps() {
   for (const seg of segments) {
     drawPolylinePartial(seg.points, 1, seg.foot);
   }
+  drawTurnAnnotations(segments);
   drawStartStar(segments[0]?.points?.[0]);
   drawStartStateLabel(segments[0]?.points?.[0]);
 }
@@ -2308,6 +2687,7 @@ function playAnimation() {
         for (const seg of segments) {
           drawPolylinePartial(seg.points, 1, seg.foot);
         }
+        drawTurnAnnotations(segments);
         drawStartStar(segments[0]?.points?.[0]);
         drawStartStateLabel(segments[0]?.points?.[0]);
         drawFootMarker(getMarkerPose(lastSegment, 1));
@@ -2337,6 +2717,7 @@ function playAnimation() {
       }
 
       drawPolylinePartial(segment.points, progress, segment.foot);
+      drawTurnAnnotations(segments);
       drawStartStar(segments[0]?.points?.[0]);
       drawStartStateLabel(segments[0]?.points?.[0]);
       drawFootMarker(getMarkerPose(segment, progress));
@@ -2545,6 +2926,12 @@ manualTurnListEl?.addEventListener("click", event => {
 });
 startStateEl?.addEventListener("change", saveSettingsToCookie);
 countEl?.addEventListener("input", saveSettingsToCookie);
+countDownButton?.addEventListener("click", () => {
+  changeCountBy(-1);
+});
+countUpButton?.addEventListener("click", () => {
+  changeCountBy(1);
+});
 sequenceInputEl?.addEventListener("input", saveSettingsToCookie);
 
 fillStates();
