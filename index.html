@@ -163,7 +163,23 @@ button.secondary {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 14px;
+  margin: 10px 14px 14px;
+}
+
+.count-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.count-stepper {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 12px;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .manual-turn-list {
@@ -223,8 +239,7 @@ canvas {
     <div class="panel">
         <div class="panel-header">
             <div class="panel-title">
-                <strong>&#x5165;&#x529B;&#x30A8;&#x30EA;&#x30A2;</strong>
-                <span>&#x30E9;&#x30F3;&#x30C0;&#x30E0;&#x751F;&#x6210;&#x3068;&#x624B;&#x52D5;&#x4F5C;&#x6210;&#x3092;&#x5207;&#x308A;&#x66FF;&#x3048;</span>
+                <strong>&#x30B9;&#x30C6;&#x30C3;&#x30D7;&#x304A;&#x984C;&#x4F5C;&#x6210;&#x30C4;&#x30FC;&#x30EB;</strong>
             </div>
             <button id="toggleInputPanel" class="secondary mini-button" type="button">&#x6298;&#x308A;&#x7573;&#x307F;</button>
         </div>
@@ -244,7 +259,11 @@ canvas {
 
                     <div class="field">
                         <label for="count">&#x6280;&#x6570;</label>
-                        <input id="count" type="number" value="10" min="1" max="50"/>
+                        <div class="count-row">
+                            <button id="countDown" class="secondary count-stepper" type="button">-</button>
+                            <input id="count" type="number" value="10" min="1" max="50"/>
+                            <button id="countUp" class="secondary count-stepper" type="button">+</button>
+                        </div>
                     </div>
 
                     <div id="turnFilters" class="field">
@@ -291,11 +310,11 @@ canvas {
                     </div>
                 </div>
             </div>
+        </div>
 
-            <div class="button-row">
-                <button id="run">&#x78BA;&#x5B9A;</button>
-                <button id="play" class="secondary">&#x518D;&#x751F;</button>
-            </div>
+        <div class="button-row">
+            <button id="run">&#x751F;&#x6210;</button>
+            <button id="play" class="secondary">&#x518D;&#x751F;</button>
         </div>
     </div>
 
