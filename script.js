@@ -19,7 +19,7 @@ const EDGE_CODES = STATES.map(([code]) => code);
 const TURN_LABELS = {
   Three: "スリーターン",
   Bracket: "ブラケット",
-  Loop: "ループターン",
+  Loop: "ループ",
   Mohawk: "モホーク",
   ChangeFoot: "チェンジフット",
   ChangeFootSwitch: "円切替チェンジフット",
@@ -46,6 +46,8 @@ const TOKEN_TURNS = Object.fromEntries(
   Object.entries(TURN_TOKENS).map(([turnName, token]) => [token, turnName])
 );
 const RANDOM_START_STATE = "RANDOM";
+const RANDOM_CIRCLE_SIZE = "RANDOM";
+const TURN_FEATURE_UNIT = FIXED_RADIUS;
 function turnLabelJP(turnName) {
   return TURN_LABELS[turnName] ?? turnName;
 }
@@ -93,6 +95,7 @@ const sequenceInputEl = document.getElementById("sequenceInput");
 const copySequenceButton = document.getElementById("copySequence");
 const clearSequenceInputButton = document.getElementById("clearSequenceInput");
 const startStateEl = document.getElementById("startState");
+const circleSizeEl = document.getElementById("circleSize");
 const manualStartStateEl = document.getElementById("manualStartState");
 const countEl = document.getElementById("count");
 const countDownButton = document.getElementById("countDown");
@@ -136,6 +139,7 @@ const MAX_CANVAS_ZOOM = 3.5;
 let activeInputMode = INPUT_MODES.RANDOM;
 let canvasZoom = 1;
 let pinchState = null;
+let currentCircleSize = 1;
 const mixedHornTuning = {
   sameToSwitch: {
     clipOffset: 0.30,
@@ -170,6 +174,55 @@ function fillStates() {
 
 function getAllTurnNames() {
   return [...new Set(Object.values(TURN_CANDIDATES).flat())];
+}
+
+function getCircleRadiusScale() {
+  return 1 + (currentCircleSize - 1) * 0.5;
+}
+
+function resolveCircleSize(value) {
+  if (value === RANDOM_CIRCLE_SIZE) {
+    return pick([1, 2, 3]);
+  }
+  const size = Number(value);
+  return [1, 2, 3].includes(size) ? size : 1;
+}
+
+function getCircleSegments() {
+  return currentCircleSize * 2 + 2;
+}
+
+function getCircleStepAngle() {
+  return (Math.PI * 2) / getCircleSegments();
+}
+
+function normalizeAngle(angle) {
+  let value = angle;
+  while (value <= -Math.PI) value += Math.PI * 2;
+  while (value > Math.PI) value -= Math.PI * 2;
+  return value;
+}
+
+function getInitialPlacement(startStateCode) {
+  const centerRow = Math.floor(gridRows / 2);
+  const centerCol = Math.floor(gridCols / 2);
+  const base = {
+    LFI: { row: centerRow, col: centerCol, vertex: "L", dir: "cw" },
+    RFO: { row: centerRow, col: centerCol, vertex: "L", dir: "cw" },
+    LBI: { row: centerRow, col: centerCol, vertex: "L", dir: "ccw" },
+    RBO: { row: centerRow, col: centerCol, vertex: "L", dir: "ccw" },
+    LFO: { row: centerRow, col: centerCol - 1, vertex: "R", dir: "ccw" },
+    RFI: { row: centerRow, col: centerCol - 1, vertex: "R", dir: "ccw" },
+    LBO: { row: centerRow, col: centerCol - 1, vertex: "R", dir: "cw" },
+    RBI: { row: centerRow, col: centerCol - 1, vertex: "R", dir: "cw" },
+  };
+  const placement = base[startStateCode] ?? base.LFO;
+  return {
+    row: placement.row,
+    col: placement.col,
+    vertex: getVertexAngle(placement.vertex),
+    dir: placement.dir,
+  };
 }
 
 function setCookie(name, value, maxAgeSeconds = SETTINGS_COOKIE_MAX_AGE) {
@@ -231,11 +284,11 @@ function getManualTurnNames() {
     .filter(Boolean);
 }
 
-function buildSequenceTextFromParts(startStateCode, turnNames) {
+function buildSequenceTextFromParts(startStateCode, turnNames, circleSize = currentCircleSize) {
   if (!startStateCode || !turnNames.length) return "";
 
   return [
-    `${startStateCode}:${turnToken(turnNames[0])}`,
+    `${circleSize}|${startStateCode}:${turnToken(turnNames[0])}`,
     ...turnNames.slice(1).map(turnName => turnToken(turnName)),
   ].join("→");
 }
@@ -522,6 +575,7 @@ function getEnabledTurnEdgeMap() {
 function collectSettings() {
   return {
     startState: startStateEl?.value ?? RANDOM_START_STATE,
+    circleSize: circleSizeEl?.value ?? RANDOM_CIRCLE_SIZE,
     count: countEl?.value ?? "10",
     activeInputMode,
     inputPanelCollapsed: inputPanelBodyEl?.hidden ?? false,
@@ -577,6 +631,16 @@ function restoreSettingsFromCookie() {
 
     if (saved.count != null) {
       countEl.value = String(saved.count);
+    }
+
+    if (saved.circleSize != null && circleSizeEl) {
+      const size = Number(saved.circleSize);
+      if ([1, 2, 3].includes(size)) {
+        circleSizeEl.value = String(size);
+        currentCircleSize = size;
+      } else if (saved.circleSize === RANDOM_CIRCLE_SIZE) {
+        circleSizeEl.value = RANDOM_CIRCLE_SIZE;
+      }
     }
 
     if (typeof saved.sequenceInput === "string" && sequenceInputEl) {
@@ -645,7 +709,7 @@ function getCandidateTurnsForModes(a, b, skateState, enabledMap = getEnabledTurn
 }
 
 function buildSequenceText() {
-  return buildSequenceTextFromParts(stateToCode(stepStates[0]), turns);
+  return buildSequenceTextFromParts(stateToCode(stepStates[0]), turns, currentCircleSize);
 }
 
 function parseSequenceText(text) {
@@ -661,19 +725,20 @@ function parseSequenceText(text) {
     throw new Error("シークエンス入力が空です。");
   }
 
-  const firstSegment = segments[0].match(/^([LR][FB][OI]):([A-Z_]+)$/i);
+  const firstSegment = segments[0].match(/^([123])\|([LR][FB][OI]):([A-Z_]+)$/i);
   if (!firstSegment) {
     throw new Error(`1個目の形式が不正です: ${segments[0]}`);
   }
 
-  const startStateCode = firstSegment[1].toUpperCase();
+  const circleSize = Number(firstSegment[1]);
+  const startStateCode = firstSegment[2].toUpperCase();
   if (!isEdgeCode(startStateCode)) {
     throw new Error(`開始エッジが不正です: ${startStateCode}`);
   }
 
   const turnNames = segments.map((segment, index) => {
     const token = index === 0
-      ? firstSegment[2].toUpperCase()
+      ? firstSegment[3].toUpperCase()
       : (() => {
           if (/^[A-Z_]+$/i.test(segment)) return segment.toUpperCase();
           throw new Error(`${index + 1}個目の形式が不正です: ${segment}`);
@@ -692,6 +757,7 @@ function parseSequenceText(text) {
   }
 
   return {
+    circleSize,
     startStateCode,
     turnNames,
   };
@@ -736,7 +802,7 @@ function buildGrid(rows = gridRows, cols = gridCols) {
   gridCols = cols;
   circles = [];
 
-  radius = FIXED_RADIUS;
+  radius = FIXED_RADIUS * getCircleRadiusScale();
 
   const offsetX = GRID_PADDING + radius;
   const offsetY = GRID_PADDING + radius;
@@ -756,7 +822,7 @@ function buildGrid(rows = gridRows, cols = gridCols) {
 function drawGrid() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.strokeStyle = "rgba(255,255,255,0.16)";
-  ctx.lineWidth = Math.max(2, radius * 0.04);
+  ctx.lineWidth = Math.max(2, TURN_FEATURE_UNIT * 0.04);
   ctx.shadowBlur = 0;
 
   for (const c of circles) {
@@ -768,7 +834,7 @@ function drawGrid() {
 
 function prepareStrokeStyle(color) {
   ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(5, radius * 0.085);
+  ctx.lineWidth = Math.max(5, TURN_FEATURE_UNIT * 0.085);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.shadowColor = color;
@@ -791,9 +857,8 @@ function getCircle(r, c) {
 }
 
 function nextVertex(v, dir) {
-  const o = ["U", "R", "D", "L"];
-  const i = o.indexOf(v);
-  return dir === "cw" ? o[(i + 1) % 4] : o[(i + 3) % 4];
+  const angle = getVertexAngle(v);
+  return normalizeAngle(angle + (dir === "cw" ? 1 : -1) * getCircleStepAngle());
 }
 
 function flipDir(d) {
@@ -801,10 +866,7 @@ function flipDir(d) {
 }
 
 function vertexPos(circle, v) {
-  if (v === "U") return { x: circle.cx, y: circle.cy - radius };
-  if (v === "D") return { x: circle.cx, y: circle.cy + radius };
-  if (v === "L") return { x: circle.cx - radius, y: circle.cy };
-  return { x: circle.cx + radius, y: circle.cy };
+  return pointOnCircle(circle, getVertexAngle(v));
 }
 
 function pointOnCircle(circle, angle) {
@@ -815,20 +877,41 @@ function pointOnCircle(circle, angle) {
 }
 
 function neighbor(r, c, v) {
-  if (v === "R" && c < gridCols - 1) return { row: r, col: c + 1, enter: "L" };
-  if (v === "L" && c > 0) return { row: r, col: c - 1, enter: "R" };
-  if (v === "U" && r > 0) return { row: r - 1, col: c, enter: "D" };
-  if (v === "D" && r < gridRows - 1) return { row: r + 1, col: c, enter: "U" };
+  const angle = normalizeAngle(getVertexAngle(v));
+  const base = {
+    U: -Math.PI / 2,
+    R: 0,
+    D: Math.PI / 2,
+    L: Math.PI,
+  };
+  const epsilon = 0.0001;
+
+  if (Math.abs(normalizeAngle(angle - base.R)) < epsilon && c < gridCols - 1) {
+    return { row: r, col: c + 1, enter: base.L };
+  }
+  if (Math.abs(normalizeAngle(angle - base.L)) < epsilon && c > 0) {
+    return { row: r, col: c - 1, enter: base.R };
+  }
+  if (Math.abs(normalizeAngle(angle - base.U)) < epsilon && r > 0) {
+    return { row: r - 1, col: c, enter: base.D };
+  }
+  if (Math.abs(normalizeAngle(angle - base.D)) < epsilon && r < gridRows - 1) {
+    return { row: r + 1, col: c, enter: base.U };
+  }
   return null;
 }
 
 function getStartGeometry(state) {
-  return { vertex: "L", dir: "cw" };
+  const placement = getInitialPlacement(state);
+  return { vertex: placement.vertex, dir: placement.dir };
 }
 
 function getVertexAngle(v) {
+  if (typeof v === "number") {
+    return normalizeAngle(v);
+  }
   const base = { U: -Math.PI / 2, R: 0, D: Math.PI / 2, L: Math.PI };
-  return base[v];
+  return base[v] ?? base.U;
 }
 
 /* =========================
@@ -1015,62 +1098,27 @@ function resolveTurnForModes(prevMode, nextMode, skateState, enabledMap = getEna
 }
 
 function buildStepInfosFromTurns(startStateCode, turnNames) {
-  const g = getStartGeometry(startStateCode);
   const importedModes = getModesFromTurnSequence(turnNames);
 
   if (!importedModes?.length) {
     throw new Error("シークエンスからモードを復元できませんでした。");
   }
 
-  let state = {
-    row: Math.floor(gridRows / 2),
-    col: Math.floor(gridCols / 2),
-    vertex: g.vertex,
-    dir: g.dir,
-  };
+  let state = getInitialPlacement(startStateCode);
 
-  modes = importedModes.slice();
-  turns = turnNames.slice();
+  modes = [];
+  turns = [];
   stepInfos = [];
   stepStates = [parseStateCode(startStateCode)];
 
-  for (const turnName of turns) {
-    stepStates.push(applyTurnState(stepStates[stepStates.length - 1], turnName));
-  }
-
-  for (let i = 0; i < modes.length; i++) {
-    const mode = modes[i];
+  const buildModeStep = (mode, isLastStep = false) => {
     const circle = getCircle(state.row, state.col);
-
     if (mode === "same") {
-      if (i === 0) {
-        const firstArcMap = {
-          LFI: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2), from: "L", to: "U", dir: "cw" },
-          RFO: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2), from: "L", to: "U", dir: "cw" },
-          LBI: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2), from: "L", to: "D", dir: "ccw" },
-          RBO: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2), from: "L", to: "D", dir: "ccw" },
-          LFO: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2) - 1, from: "R", to: "U", dir: "ccw" },
-          RFI: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2) - 1, from: "R", to: "U", dir: "ccw" },
-          LBO: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2) - 1, from: "R", to: "D", dir: "cw" },
-          RBI: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2) - 1, from: "R", to: "D", dir: "cw" },
-        };
-
-        const first = firstArcMap[startStateCode];
-        if (first) {
-          const firstCircle = getCircle(first.row, first.col);
-          stepInfos.push(createArcStep(firstCircle, first.from, first.to, first.dir));
-          state.row = first.row;
-          state.col = first.col;
-          state.vertex = first.to;
-          state.dir = first.dir;
-          continue;
-        }
-      }
-
       const nv = nextVertex(state.vertex, state.dir);
       stepInfos.push(createArcStep(circle, state.vertex, nv, state.dir));
+      modes.push("same");
       state.vertex = nv;
-      continue;
+      return;
     }
 
     const nb = neighbor(state.row, state.col, state.vertex);
@@ -1081,17 +1129,31 @@ function buildStepInfosFromTurns(startStateCode, turnNames) {
     const nc = getCircle(nb.row, nb.col);
     const nd = flipDir(state.dir);
     const nv = nextVertex(nb.enter, nd);
-    const startTrim = 0.18;
-    const endTrim = i === modes.length - 1 ? 0 : 0.18;
-
     stepInfos.push(
-      createSwitchStep(circle, state.vertex, nc, nb.enter, nv, nd, startTrim, endTrim)
+      createSwitchStep(circle, state.vertex, nc, nb.enter, nv, nd, 0.18, isLastStep ? 0 : 0.18)
     );
-
+    modes.push("switch");
     state.row = nb.row;
     state.col = nb.col;
     state.vertex = nv;
     state.dir = nd;
+  };
+
+  buildModeStep(importedModes[0], importedModes.length === 1);
+
+  for (let i = 0; i < turnNames.length; i++) {
+    const turnName = turnNames[i];
+    const targetMode = importedModes[i + 1];
+
+    while (targetMode === "switch" && !neighbor(state.row, state.col, state.vertex)) {
+      turns.push("Skating");
+      stepStates.push(applyTurnState(stepStates[stepStates.length - 1], "Skating"));
+      buildModeStep("same", false);
+    }
+
+    turns.push(turnName);
+    stepStates.push(applyTurnState(stepStates[stepStates.length - 1], turnName));
+    buildModeStep(targetMode, i === turnNames.length - 1);
   }
 }
 /* =========================
@@ -1238,8 +1300,8 @@ function fitGridToContent() {
   const visibleRows = maxRow - minRow + 1;
   const visibleCols = maxCol - minCol + 1;
 
-  canvas.width = visibleCols * FIXED_RADIUS * 2 + GRID_PADDING * 2;
-  canvas.height = visibleRows * FIXED_RADIUS * 2 + GRID_PADDING * 2;
+  canvas.width = visibleCols * radius * 2 + GRID_PADDING * 2;
+  canvas.height = visibleRows * radius * 2 + GRID_PADDING * 2;
 
   buildGrid(visibleRows, visibleCols);
   relayoutStepInfos(minRow, minCol);
@@ -1256,9 +1318,9 @@ function expandCanvasForStartLabel() {
   const point = segments[0]?.points?.[0];
   if (!point) return;
 
-  const offsetX = radius * 0.28;
-  const padding = radius * 0.18;
-  const fontSize = Math.max(14, radius * 0.2);
+  const offsetX = TURN_FEATURE_UNIT * 0.28;
+  const padding = TURN_FEATURE_UNIT * 0.18;
+  const fontSize = Math.max(14, TURN_FEATURE_UNIT * 0.2);
 
   ctx.save();
   ctx.font = `${fontSize}px sans-serif`;
@@ -1393,15 +1455,8 @@ function setupCanvasViewportInteractions() {
 }
 
 function buildStepInfos(stepCount, startStateCode) {
-  const g = getStartGeometry(startStateCode);
   const enabledMap = getEnabledTurnEdgeMap();
-
-  let state = {
-    row: Math.floor(gridRows / 2),
-    col: Math.floor(gridCols / 2),
-    vertex: g.vertex,
-    dir: g.dir,
-  };
+  let state = getInitialPlacement(startStateCode);
   let skateState = parseStateCode(startStateCode);
 
   modes = [];
@@ -1448,36 +1503,6 @@ function buildStepInfos(stepCount, startStateCode) {
     }
 
     if (mode === "same") {
-      if (i === 0) {
-        const firstArcMap = {
-          LFI: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2),     from: "L", to: "U", dir: "cw"  },
-          RFO: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2),     from: "L", to: "U", dir: "cw"  },
-
-          LBI: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2),     from: "L", to: "D", dir: "ccw" },
-          RBO: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2),     from: "L", to: "D", dir: "ccw" },
-
-          LFO: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2) - 1, from: "R", to: "U", dir: "ccw" },
-          RFI: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2) - 1, from: "R", to: "U", dir: "ccw" },
-
-          LBO: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2) - 1, from: "R", to: "D", dir: "cw"  },
-          RBI: { row: Math.floor(gridRows / 2), col: Math.floor(gridCols / 2) - 1, from: "R", to: "D", dir: "cw"  },
-        };
-
-        const first = firstArcMap[startStateCode];
-        if (first) {
-          const firstCircle = getCircle(first.row, first.col);
-
-          stepInfos.push(createArcStep(firstCircle, first.from, first.to, first.dir));
-          modes.push("same");
-
-          state.row = first.row;
-          state.col = first.col;
-          state.vertex = first.to;
-          state.dir = first.dir;
-          continue;
-        }
-      }
-
       const nv = nextVertex(state.vertex, state.dir);
       stepInfos.push(createArcStep(circle, state.vertex, nv, state.dir));
       modes.push("same");
@@ -1810,8 +1835,8 @@ function getMarkerPose(segment, progress) {
 }
 
 function drawFootMarker(pose) {
-  const length = radius * 0.34;
-  const width = radius * 0.22;
+  const length = TURN_FEATURE_UNIT * 0.34;
+  const width = TURN_FEATURE_UNIT * 0.22;
 
   ctx.save();
   ctx.translate(pose.x, pose.y);
@@ -1820,9 +1845,9 @@ function drawFootMarker(pose) {
   const color = footColor(pose.state.foot);
   ctx.fillStyle = color;
   ctx.strokeStyle = "rgba(255,255,255,0.92)";
-  ctx.lineWidth = Math.max(1.5, radius * 0.03);
+  ctx.lineWidth = Math.max(1.5, TURN_FEATURE_UNIT * 0.03);
   ctx.shadowColor = color;
-  ctx.shadowBlur = radius * 0.16;
+  ctx.shadowBlur = TURN_FEATURE_UNIT * 0.16;
 
   ctx.beginPath();
   ctx.moveTo(length * 0.68, 0);
@@ -1844,16 +1869,16 @@ function drawFootMarker(pose) {
 function drawStartStar(point) {
   if (!point) return;
 
-  const outerRadius = radius * 0.18;
+  const outerRadius = TURN_FEATURE_UNIT * 0.18;
   const innerRadius = outerRadius * 0.48;
 
   ctx.save();
   ctx.translate(point.x, point.y);
   ctx.fillStyle = "#ffd84d";
   ctx.strokeStyle = "rgba(255,255,255,0.95)";
-  ctx.lineWidth = Math.max(1.5, radius * 0.025);
+  ctx.lineWidth = Math.max(1.5, TURN_FEATURE_UNIT * 0.025);
   ctx.shadowColor = "#ffd84d";
-  ctx.shadowBlur = radius * 0.18;
+  ctx.shadowBlur = TURN_FEATURE_UNIT * 0.18;
 
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
@@ -1880,16 +1905,16 @@ function drawStartStateLabel(point) {
   const label = getStartLabelText();
 
   ctx.save();
-  ctx.font = `${Math.max(14, radius * 0.2)}px sans-serif`;
+  ctx.font = `${Math.max(14, TURN_FEATURE_UNIT * 0.2)}px sans-serif`;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#eef3ff";
   ctx.strokeStyle = "rgba(11,16,32,0.92)";
-  ctx.lineWidth = Math.max(3, radius * 0.05);
+  ctx.lineWidth = Math.max(3, TURN_FEATURE_UNIT * 0.05);
   ctx.shadowColor = "rgba(0,0,0,0.35)";
-  ctx.shadowBlur = radius * 0.08;
-  ctx.strokeText(label, point.x + radius * 0.28, point.y);
-  ctx.fillText(label, point.x + radius * 0.28, point.y);
+  ctx.shadowBlur = TURN_FEATURE_UNIT * 0.08;
+  ctx.strokeText(label, point.x + TURN_FEATURE_UNIT * 0.28, point.y);
+  ctx.fillText(label, point.x + TURN_FEATURE_UNIT * 0.28, point.y);
   ctx.restore();
 }
 
@@ -1935,18 +1960,90 @@ function drawTurnAnnotations(segments) {
     if (!point) continue;
 
     ctx.save();
-    ctx.font = `700 ${Math.max(14, radius * 0.22)}px sans-serif`;
+    ctx.font = `700 ${Math.max(14, TURN_FEATURE_UNIT * 0.22)}px sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ffd84d";
     ctx.strokeStyle = "rgba(11,16,32,0.92)";
-    ctx.lineWidth = Math.max(3, radius * 0.05);
+    ctx.lineWidth = Math.max(3, TURN_FEATURE_UNIT * 0.05);
     ctx.shadowColor = "rgba(0,0,0,0.3)";
-    ctx.shadowBlur = radius * 0.08;
+    ctx.shadowBlur = TURN_FEATURE_UNIT * 0.08;
     ctx.strokeText(label, point.x, point.y);
     ctx.fillText(label, point.x, point.y);
     ctx.restore();
   }
+}
+
+function getTurnPopupLabel(turnIndex) {
+  const turn = turns[turnIndex];
+  if (!turn || turn === "Skating") return "";
+
+  const state = stepStates[turnIndex] || parseStateCode(currentStartStateCode);
+  return `(${stateToCode(state)}) ${turnLabelJP(turn)}`;
+}
+
+function hasDedicatedTurnSegment(turnIndex, segments) {
+  return segments.some(segment =>
+    segment.turnIndex === turnIndex &&
+    segment.type !== "step" &&
+    segment.points?.length
+  );
+}
+
+function getPopupTurnIndex(segment, segments) {
+  if (!segment) return -1;
+
+  if (segment.type !== "step") {
+    return segment.turnIndex ?? -1;
+  }
+
+  const stepIndex = segment.stepIndex ?? -1;
+  if (stepIndex <= 0) return -1;
+
+  const previousTurnIndex = stepIndex - 1;
+  if (hasDedicatedTurnSegment(previousTurnIndex, segments)) {
+    return -1;
+  }
+
+  return previousTurnIndex;
+}
+
+function drawTurnPopup(segment, progress, segments) {
+  if (
+    !segment?.points?.length ||
+    progress >= 0.5
+  ) {
+    return;
+  }
+
+  const popupTurnIndex = getPopupTurnIndex(segment, segments);
+  const label = getTurnPopupLabel(popupTurnIndex);
+  if (!label) return;
+
+  const point = getInterpolatedPoint(segment.points, 0.5);
+  const popupProgress = segment.type === "step"
+    ? Math.min(1, progress / 0.5)
+    : progress / 0.5;
+  const normalized = Math.max(0, Math.min(1, popupProgress));
+  const alpha = normalized < 0.2
+    ? normalized / 0.2
+    : Math.max(0, 1 - (normalized - 0.2) / 0.8);
+
+  if (alpha <= 0) return;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `700 ${Math.max(15, TURN_FEATURE_UNIT * 0.22)}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "rgba(11,16,32,0.9)";
+  ctx.lineWidth = Math.max(3, TURN_FEATURE_UNIT * 0.045);
+  ctx.shadowColor = "rgba(255,255,255,0.18)";
+  ctx.shadowBlur = TURN_FEATURE_UNIT * 0.12;
+  ctx.strokeText(label, point.x, point.y - TURN_FEATURE_UNIT * 0.18);
+  ctx.fillText(label, point.x, point.y - TURN_FEATURE_UNIT * 0.18);
+  ctx.restore();
 }
 
 /* =========================
@@ -1961,8 +2058,8 @@ function getSwitchHornGeometry(step, nextStep, outward = false) {
     ? { x: -inward.x, y: -inward.y }
     : inward;
 
-  const hornDepth = radius * 0.22;
-  const enterOffset = radius * 0.40;
+  const hornDepth = TURN_FEATURE_UNIT * 0.22;
+  const enterOffset = TURN_FEATURE_UNIT * 0.40;
 
   const centerAngle = getVertexAngle(step.exitVertex);
 
@@ -1996,9 +2093,9 @@ function getHornGeometry(step, nextStep, outward = false) {
     ? { x: -inward.x, y: -inward.y }
     : inward;
 
-  const hornDepth = radius * 0.22;
-  const enterOffset = radius * 0.30;
-  const exitOffset = radius * 0.30;
+  const hornDepth = TURN_FEATURE_UNIT * 0.22;
+  const enterOffset = TURN_FEATURE_UNIT * 0.30;
+  const exitOffset = TURN_FEATURE_UNIT * 0.30;
 
   const centerAngle = Math.atan2(py - step.circle.cy, px - step.circle.cx);
 
@@ -2034,8 +2131,8 @@ function getThreeHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POI
   const enterTan = tangentUnit(step.dir, horn.enterAngle);
   const exitTan = tangentUnit(nextStep.dir, horn.exitAngle);
 
-  const enterBend = radius * 0.24;
-  const exitBend = radius * 0.24;
+  const enterBend = TURN_FEATURE_UNIT * 0.24;
+  const exitBend = TURN_FEATURE_UNIT * 0.24;
 
   const c1 = {
     x: horn.enterPoint.x + enterTan.x * enterBend,
@@ -2067,8 +2164,8 @@ function getLoopGeometry(step) {
   const inward = normalize(step.circle.cx - joint.x, step.circle.cy - joint.y);
   const tangent = tangentUnit(step.dir, step.endAngle);
   const centerAngle = Math.atan2(joint.y - step.circle.cy, joint.x - step.circle.cx);
-  const clipOffset = radius * 0.22;
-  const loopRadius = radius * 0.22;
+  const clipOffset = TURN_FEATURE_UNIT * 0.22;
+  const loopRadius = TURN_FEATURE_UNIT * 0.22;
 
   let enterAngle;
   let exitAngle;
@@ -2140,8 +2237,8 @@ function getLoopStartGeometry(step) {
   const inward = normalize(step.circle.cx - joint.x, step.circle.cy - joint.y);
   const tangent = tangentUnit(step.dir, step.startAngle);
   const centerAngle = Math.atan2(joint.y - step.circle.cy, joint.x - step.circle.cx);
-  const clipOffset = radius * mixedHornTuning.switchToSame.clipOffset;
-  const loopRadius = radius * 0.22;
+  const clipOffset = TURN_FEATURE_UNIT * mixedHornTuning.switchToSame.clipOffset;
+  const loopRadius = TURN_FEATURE_UNIT * 0.22;
 
   let enterAngle;
   let exitAngle;
@@ -2216,8 +2313,8 @@ function getSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_PO
     nextStep.bridgeEnd.y - nextStep.bridgeStart.y
   );
 
-  const enterBend = radius * 0.24;
-  const exitBend = radius * 0.20;
+  const enterBend = TURN_FEATURE_UNIT * 0.24;
+  const exitBend = TURN_FEATURE_UNIT * 0.20;
 
   const c1 = {
     x: horn.enterPoint.x + enterTan.x * enterBend,
@@ -2245,7 +2342,7 @@ function getSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_PO
 }
 
 function getSameToSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POINT_STEPS) {
-  const clipOffset = radius * mixedHornTuning.sameToSwitch.clipOffset;
+  const clipOffset = TURN_FEATURE_UNIT * mixedHornTuning.sameToSwitch.clipOffset;
   const enterAngle =
     step.dir === "cw"
       ? step.endAngle - clipOffset / radius
@@ -2262,8 +2359,8 @@ function getSameToSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMAT
     nextStep.bridgeEnd.x - nextStep.bridgeStart.x,
     nextStep.bridgeEnd.y - nextStep.bridgeStart.y
   );
-  const hornDepth = radius * mixedHornTuning.sameToSwitch.hornDepth;
-  const bend = radius * mixedHornTuning.sameToSwitch.bend;
+  const hornDepth = TURN_FEATURE_UNIT * mixedHornTuning.sameToSwitch.hornDepth;
+  const bend = TURN_FEATURE_UNIT * mixedHornTuning.sameToSwitch.bend;
   const c1 = {
     x: startPoint.x + enterTan.x * bend,
     y: startPoint.y + enterTan.y * bend,
@@ -2295,7 +2392,7 @@ function getSameToSwitchHornCurvePoints(step, nextStep, turnName, steps = ANIMAT
 }
 
 function getSwitchToSameHornCurvePoints(step, nextStep, turnName, steps = ANIMATION_POINT_STEPS) {
-  const clipOffset = radius * mixedHornTuning.switchToSame.clipOffset;
+  const clipOffset = TURN_FEATURE_UNIT * mixedHornTuning.switchToSame.clipOffset;
   const centerAngle = nextStep.startAngle;
   const enterAngle =
     step.dir === "cw"
@@ -2314,8 +2411,8 @@ function getSwitchToSameHornCurvePoints(step, nextStep, turnName, steps = ANIMAT
   const endPoint = pointOnCircle(nextStep.circle, exitAngle);
   const enterTan = tangentUnit(step.dir, enterAngle);
   const exitTan = tangentUnit(nextStep.dir, exitAngle);
-  const hornDepth = radius * mixedHornTuning.switchToSame.hornDepth;
-  const bend = radius * mixedHornTuning.switchToSame.bend;
+  const hornDepth = TURN_FEATURE_UNIT * mixedHornTuning.switchToSame.hornDepth;
+  const bend = TURN_FEATURE_UNIT * mixedHornTuning.switchToSame.bend;
   const c1 = {
     x: startPoint.x + enterTan.x * bend,
     y: startPoint.y + enterTan.y * bend,
@@ -2583,6 +2680,7 @@ function buildRenderSegments() {
     const state = stepStates[i] || parseStateCode("LFO");
     segments.push({
       type: "step",
+      stepIndex: i,
       turnIndex: Math.min(i, Math.max(0, turns.length - 1)),
       foot: state.foot,
       points: clippedStepPoints[i],
@@ -2720,6 +2818,7 @@ function playAnimation() {
       drawTurnAnnotations(segments);
       drawStartStar(segments[0]?.points?.[0]);
       drawStartStateLabel(segments[0]?.points?.[0]);
+      drawTurnPopup(segment, progress, segments);
       drawFootMarker(getMarkerPose(segment, progress));
 
       if (progress < 1) {
@@ -2740,6 +2839,7 @@ function playAnimation() {
 ========================= */
 function confirmRun() {
   stopAnimation();
+  currentCircleSize = resolveCircleSize(circleSizeEl?.value);
 
   const turnCount = Math.max(
     1,
@@ -2748,8 +2848,9 @@ function confirmRun() {
   let sequenceText = sequenceInputEl?.value.trim() ?? "";
   let startState = startStateEl.value;
 
-  canvas.width = BASE_GRID_COLS * FIXED_RADIUS * 2 + GRID_PADDING * 2;
-  canvas.height = BASE_GRID_ROWS * FIXED_RADIUS * 2 + GRID_PADDING * 2;
+  const baseRadius = FIXED_RADIUS * getCircleRadiusScale();
+  canvas.width = BASE_GRID_COLS * baseRadius * 2 + GRID_PADDING * 2;
+  canvas.height = BASE_GRID_ROWS * baseRadius * 2 + GRID_PADDING * 2;
   applyCanvasZoom();
   buildGrid(BASE_GRID_ROWS, BASE_GRID_COLS);
 
@@ -2770,6 +2871,14 @@ function confirmRun() {
       }
 
       const parsed = parseSequenceText(sequenceText);
+      currentCircleSize = parsed.circleSize;
+      if (circleSizeEl) {
+        circleSizeEl.value = String(parsed.circleSize);
+      }
+      canvas.width = BASE_GRID_COLS * radius * 2 + GRID_PADDING * 2;
+      canvas.height = BASE_GRID_ROWS * radius * 2 + GRID_PADDING * 2;
+      applyCanvasZoom();
+      buildGrid(BASE_GRID_ROWS, BASE_GRID_COLS);
       startState = parsed.startStateCode;
       if (manualStartStateEl) {
         manualStartStateEl.value = startState;
@@ -2925,6 +3034,10 @@ manualTurnListEl?.addEventListener("click", event => {
   saveSettingsToCookie();
 });
 startStateEl?.addEventListener("change", saveSettingsToCookie);
+circleSizeEl?.addEventListener("change", () => {
+  currentCircleSize = resolveCircleSize(circleSizeEl.value);
+  saveSettingsToCookie();
+});
 countEl?.addEventListener("input", saveSettingsToCookie);
 countDownButton?.addEventListener("click", () => {
   changeCountBy(-1);
@@ -2940,6 +3053,7 @@ renderManualTurnList([]);
 setActiveInputMode(INPUT_MODES.RANDOM);
 setInputPanelCollapsed(false);
 restoreSettingsFromCookie();
+currentCircleSize = resolveCircleSize(circleSizeEl?.value);
 ensureScrollableCanvas();
 applyCanvasZoom();
 setupCanvasViewportInteractions();
