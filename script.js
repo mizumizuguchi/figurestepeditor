@@ -2189,69 +2189,6 @@ function buildRenderSegments() {
           0.5
         ),
       };
-      continue;
-    }
-
-    const mixedIntoSwitch =
-      (turn === "Rocker" || turn === "Counter") &&
-      nextStep &&
-      step.mode === "same" &&
-      nextStep.mode === "switch" &&
-      step.circle === nextStep.fromCircle;
-
-    if (mixedIntoSwitch) {
-      const hornData = getSwitchHornCurvePoints(step, nextStep, turn);
-      sameEndClipAngles[i] = hornData.horn.enterAngle;
-
-      boundarySegments[i] = {
-        type: "special-mixed-into-switch",
-        turn,
-        turnIndex: i,
-        foot: startState.foot,
-        points: hornData.points,
-        stateSamples: buildTransitionStateSamples(
-          hornData.points,
-          startState,
-          endState,
-          0.5
-        ),
-      };
-      continue;
-    }
-
-    const mixedIntoSame =
-      (turn === "Three" || turn === "Bracket" || turn === "Loop") &&
-      nextStep &&
-      step.mode === "switch" &&
-      nextStep.mode === "same" &&
-      step.toCircle === nextStep.circle;
-
-    if (mixedIntoSame) {
-      const sameData = turn === "Loop"
-        ? getLoopCurvePoints(nextStep)
-        : getThreeHornCurvePoints(step, nextStep, turn);
-
-      if (turn === "Loop") {
-        sameStartClipAngles[i + 1] = sameData.loop.exitAngle;
-      } else {
-        sameStartClipAngles[i + 1] = sameData.horn.exitAngle;
-      }
-
-      boundarySegments[i] = {
-        type: "special-mixed-into-same",
-        turn,
-        turnIndex: i,
-        foot: startState.foot,
-        points: sameData.points,
-        stateSamples: turn === "Loop"
-          ? buildConstantStateSamples(sameData.points, startState)
-          : buildTransitionStateSamples(
-              sameData.points,
-              startState,
-              endState,
-              0.5
-            ),
-      };
     }
   }
 
