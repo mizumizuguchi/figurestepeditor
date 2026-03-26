@@ -93,11 +93,13 @@ const canvasViewportEl = document.getElementById("canvasViewport");
 const sequenceEl = document.getElementById("sequence");
 const sequenceInputEl = document.getElementById("sequenceInput");
 const copySequenceButton = document.getElementById("copySequence");
+const shareSequenceButton = document.getElementById("shareSequence");
 const clearSequenceInputButton = document.getElementById("clearSequenceInput");
 const startStateEl = document.getElementById("startState");
 const circleSizeEl = document.getElementById("circleSize");
 const manualStartStateEl = document.getElementById("manualStartState");
 const countEl = document.getElementById("count");
+const sCurveFixedEl = document.getElementById("sCurveFixed");
 const countDownButton = document.getElementById("countDown");
 const countUpButton = document.getElementById("countUp");
 const checkAllTurnsButton = document.getElementById("checkAllTurns");
@@ -249,6 +251,18 @@ function setActiveInputMode(mode) {
 
   if (panelRandomEl) panelRandomEl.hidden = !isRandom;
   if (panelManualEl) panelManualEl.hidden = isRandom;
+
+  if (circleSizeEl) {
+    const randomOption = circleSizeEl.querySelector(`option[value="${RANDOM_CIRCLE_SIZE}"]`);
+    if (randomOption) {
+      randomOption.hidden = !isRandom;
+    }
+    if (!isRandom && circleSizeEl.value === RANDOM_CIRCLE_SIZE) {
+      circleSizeEl.value = "1";
+      currentCircleSize = 1;
+      syncSequenceInputFromManualBuilder();
+    }
+  }
 }
 
 function setInputPanelCollapsed(collapsed) {
@@ -577,6 +591,7 @@ function collectSettings() {
     startState: startStateEl?.value ?? RANDOM_START_STATE,
     circleSize: circleSizeEl?.value ?? RANDOM_CIRCLE_SIZE,
     count: countEl?.value ?? "10",
+    sCurveFixed: Boolean(sCurveFixedEl?.checked),
     activeInputMode,
     inputPanelCollapsed: inputPanelBodyEl?.hidden ?? false,
     sequenceInput: sequenceInputEl?.value ?? "",
@@ -631,6 +646,10 @@ function restoreSettingsFromCookie() {
 
     if (saved.count != null) {
       countEl.value = String(saved.count);
+    }
+
+    if (typeof saved.sCurveFixed === "boolean" && sCurveFixedEl) {
+      sCurveFixedEl.checked = saved.sCurveFixed;
     }
 
     if (saved.circleSize != null && circleSizeEl) {
@@ -710,6 +729,41 @@ function getCandidateTurnsForModes(a, b, skateState, enabledMap = getEnabledTurn
 
 function buildSequenceText() {
   return buildSequenceTextFromParts(stateToCode(stepStates[0]), turns, currentCircleSize);
+}
+
+function buildShareUrl(sequenceText) {
+  const url = new URL(window.location.href);
+  if (sequenceText) {
+    url.searchParams.set("sequence", sequenceText);
+  } else {
+    url.searchParams.delete("sequence");
+  }
+  return url.toString();
+}
+
+async function shareCurrentSequence() {
+  const text = buildSequenceText();
+  if (!text) return;
+
+  if (sequenceInputEl) {
+    sequenceInputEl.value = text;
+  }
+
+  const url = buildShareUrl(text);
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: "ステップお題作成ツール",
+        text: "ステップのシークエンスを共有します",
+        url,
+      });
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+
+  await navigator.clipboard.writeText(url);
 }
 
 function parseSequenceText(text) {
@@ -925,6 +979,35 @@ function parseStateCode(code) {
   };
 }
 
+function restoreSequenceFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const sharedSequence = params.get("sequence");
+  if (!sharedSequence || !sequenceInputEl) return false;
+
+  try {
+    const parsed = parseSequenceText(sharedSequence);
+    sequenceInputEl.value = sharedSequence;
+    if (circleSizeEl) {
+      circleSizeEl.value = String(parsed.circleSize);
+    }
+    currentCircleSize = parsed.circleSize;
+    if (manualStartStateEl) {
+      manualStartStateEl.value = parsed.startStateCode;
+    }
+    setManualBuilder(parsed.startStateCode, parsed.turnNames);
+    setActiveInputMode(INPUT_MODES.MANUAL);
+    return true;
+  } catch (error) {
+    console.warn("shared sequence restore failed", error);
+    return false;
+  }
+}
+
+function flipEdgeInCode(code) {
+  if (!isEdgeCode(code)) return code;
+  return `${code[0]}${code[1]}${flipEdge(code[2])}`;
+}
+
 function flipFoot(foot) {
   return foot === "L" ? "R" : "L";
 }
@@ -1087,6 +1170,27 @@ function detectTurns(modes) {
 }
 
 function resolveTurnForModes(prevMode, nextMode, skateState, enabledMap = getEnabledTurnEdgeMap()) {
+  if (sCurveFixedEl?.checked) {
+    let candidates = [];
+
+    if (prevMode === "same" && nextMode === "same") {
+      candidates = SAME_TURNS;
+    } else if (prevMode === "same" && nextMode === "switch") {
+      candidates = SWITCH_TURNS;
+    } else if (prevMode === "switch" && nextMode === "same") {
+      candidates = SAME_TURNS;
+    } else if (prevMode === "switch" && nextMode === "switch") {
+      candidates = SWITCH_TURNS;
+    }
+
+    const enabledCandidates = candidates.filter(turn =>
+      isTurnEnabledForState(turn, skateState, enabledMap)
+    );
+    if (enabledCandidates.length > 0) {
+      return pick(enabledCandidates);
+    }
+  }
+
   const candidates = getCandidateTurnsForModes(
     prevMode,
     nextMode,
@@ -1104,7 +1208,11 @@ function buildStepInfosFromTurns(startStateCode, turnNames) {
     throw new Error("シークエンスからモードを復元できませんでした。");
   }
 
-  let state = getInitialPlacement(startStateCode);
+  const geometryStartStateCode =
+    importedModes[0] === "switch"
+      ? flipEdgeInCode(startStateCode)
+      : startStateCode;
+  let state = getInitialPlacement(geometryStartStateCode);
 
   modes = [];
   turns = [];
@@ -1458,6 +1566,7 @@ function buildStepInfos(stepCount, startStateCode) {
   const enabledMap = getEnabledTurnEdgeMap();
   let state = getInitialPlacement(startStateCode);
   let skateState = parseStateCode(startStateCode);
+  let sameStreak = 0;
 
   modes = [];
   stepInfos = [];
@@ -1465,8 +1574,6 @@ function buildStepInfos(stepCount, startStateCode) {
   stepStates = [cloneSkateState(skateState)];
 
   for (let i = 0; i < stepCount; i++) {
-    const circle = getCircle(state.row, state.col);
-
     let candidateModes;
     if (i === 0) {
       candidateModes = getAllowedModesFromState(state, skateState, enabledMap);
@@ -1483,7 +1590,25 @@ function buildStepInfos(stepCount, startStateCode) {
       break;
     }
 
-    const mode = pick(candidateModes);
+    let mode = pick(candidateModes);
+    if (sCurveFixedEl?.checked) {
+      const targetSameCount = currentCircleSize;
+      if (sameStreak >= targetSameCount && candidateModes.includes("switch")) {
+        mode = "switch";
+      } else if (sameStreak < targetSameCount && candidateModes.includes("same")) {
+        mode = "same";
+      } else if (candidateModes.includes("switch")) {
+        mode = "switch";
+      } else if (candidateModes.includes("same")) {
+        mode = "same";
+      }
+    }
+
+    if (i === 0 && mode === "switch") {
+      state = getInitialPlacement(flipEdgeInCode(startStateCode));
+    }
+
+    const circle = getCircle(state.row, state.col);
 
     if (i > 0) {
       const turn = resolveTurnForModes(
@@ -1507,6 +1632,7 @@ function buildStepInfos(stepCount, startStateCode) {
       stepInfos.push(createArcStep(circle, state.vertex, nv, state.dir));
       modes.push("same");
       state.vertex = nv;
+      sameStreak++;
       continue;
     }
 
@@ -1532,6 +1658,7 @@ function buildStepInfos(stepCount, startStateCode) {
     state.col = nb.col;
     state.vertex = nv;
     state.dir = nd;
+    sameStreak = 0;
   }
 }
 
@@ -2981,6 +3108,13 @@ document.getElementById("play").addEventListener("click", playAnimation);
 copySequenceButton?.addEventListener("click", () => {
   copyCurrentSequence();
 });
+shareSequenceButton?.addEventListener("click", async () => {
+  try {
+    await shareCurrentSequence();
+  } catch (error) {
+    alert("共有リンクを作れませんでした。");
+  }
+});
 clearSequenceInputButton?.addEventListener("click", () => {
   if (!sequenceInputEl) return;
   sequenceInputEl.value = "";
@@ -3036,8 +3170,10 @@ manualTurnListEl?.addEventListener("click", event => {
 startStateEl?.addEventListener("change", saveSettingsToCookie);
 circleSizeEl?.addEventListener("change", () => {
   currentCircleSize = resolveCircleSize(circleSizeEl.value);
+  syncSequenceInputFromManualBuilder();
   saveSettingsToCookie();
 });
+sCurveFixedEl?.addEventListener("change", saveSettingsToCookie);
 countEl?.addEventListener("input", saveSettingsToCookie);
 countDownButton?.addEventListener("click", () => {
   changeCountBy(-1);
@@ -3053,6 +3189,7 @@ renderManualTurnList([]);
 setActiveInputMode(INPUT_MODES.RANDOM);
 setInputPanelCollapsed(false);
 restoreSettingsFromCookie();
+restoreSequenceFromQuery();
 currentCircleSize = resolveCircleSize(circleSizeEl?.value);
 ensureScrollableCanvas();
 applyCanvasZoom();
