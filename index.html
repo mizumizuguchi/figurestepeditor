@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta name="description" content="フィギュアスケートのステップお題を作成して、シーケンスを共有できるツール" />
+    <meta property="og:title" content="ステップお題作成ツール" />
+    <meta property="og:description" content="フィギュアスケートのステップお題を作成して、シーケンスを共有できるツール" />
+    <meta property="og:type" content="website" />
     <title>&#x30B9;&#x30C6;&#x30C3;&#x30D7;&#x4F5C;&#x6210;</title>
     <style>
         :root {
@@ -278,6 +282,13 @@ canvas {
                         </div>
                     </div>
 
+                    <div class="field">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; width:max-content;">
+                            <input id="sCurveFixed" type="checkbox" style="width:auto;" />
+                            <span>S&#x5B57;&#x56FA;&#x5B9A;</span>
+                        </label>
+                    </div>
+
                     <div id="turnFilters" class="field">
                         <div class="field-header">
                             <label>&#x30BF;&#x30FC;&#x30F3;&#x7A2E;&#x985E;</label>
@@ -315,10 +326,11 @@ canvas {
                             <label for="sequenceInput">&#x30B7;&#x30FC;&#x30AF;&#x30A8;&#x30F3;&#x30B9;&#x5165;&#x529B;</label>
                             <div style="display:flex; gap:6px; flex:0 0 auto;">
                                 <button id="clearSequenceInput" class="secondary mini-button" type="button">&#x30AF;&#x30EA;&#x30A2;</button>
+                                <button id="shareSequence" class="secondary mini-button" type="button">&#x5171;&#x6709;</button>
                                 <button id="copySequence" class="secondary mini-button" type="button">&#x30B3;&#x30D4;&#x30FC;</button>
                             </div>
                         </div>
-                        <textarea id="sequenceInput" placeholder="&#x4F8B;: LFO:THREE&#x2192;MOHAWK&#x2192;BRACKET"></textarea>
+                        <textarea id="sequenceInput" placeholder="&#x4F8B;: 1|LFO:THREE&#x2192;MOHAWK&#x2192;BRACKET"></textarea>
                     </div>
                 </div>
             </div>
