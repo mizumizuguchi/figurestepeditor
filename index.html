@@ -215,12 +215,27 @@
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 14px;
             background: rgba(255, 255, 255, 0.04);
-            transition: background 140ms ease, border-color 140ms ease;
+            transition: background 140ms ease, border-color 140ms ease, transform 180ms ease, box-shadow 180ms ease;
         }
 
         .turn-row.is-active {
             background: rgba(91, 134, 255, 0.22);
             border-color: rgba(109, 213, 237, 0.38);
+        }
+
+        .turn-row.is-dragging {
+            opacity: 0.96;
+            box-shadow: 0 18px 28px rgba(0, 0, 0, 0.35);
+            border-color: rgba(109, 213, 237, 0.38);
+            z-index: 30;
+        }
+
+        .turn-row-placeholder {
+            border: 1px dashed rgba(109, 213, 237, 0.32);
+            border-radius: 14px;
+            background: rgba(109, 213, 237, 0.08);
+            min-height: 57px;
+            box-sizing: border-box;
         }
 
         .edge-pill {
@@ -250,6 +265,7 @@
             font-size: 14px;
             line-height: 1;
             user-select: none;
+            touch-action: none;
         }
 
         .drag-handle:active {
