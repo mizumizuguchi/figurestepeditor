@@ -1398,6 +1398,7 @@ function ensureScrollableCanvas() {
   wrap.style.overflow = "auto";
   wrap.style.maxWidth = "100%";
   wrap.style.maxHeight = "100%";
+  wrap.style.height = "100%";
 }
 
 function clampCanvasZoom(value) {
