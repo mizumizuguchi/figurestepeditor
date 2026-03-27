@@ -107,6 +107,8 @@ const toggleSettingsButton = document.getElementById("toggleSettings");
 const closeSettingsButton = document.getElementById("closeSettings");
 const settingsDrawerEl = document.getElementById("settingsDrawer");
 const settingsOverlayEl = document.getElementById("settingsOverlay");
+const mainPanelEl = document.querySelector(".main-panel");
+const toggleCanvasFocusButton = document.getElementById("toggleCanvasFocus");
 
 const LEFT_FOOT_COLOR = "#2aa8ff";
 const RIGHT_FOOT_COLOR = "#22c55e";
@@ -146,6 +148,20 @@ const mixedHornTuning = {
     bend: 0.27,
   },
 };
+
+function canvasFocusIcon(expanded) {
+  return expanded
+    ? `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 3v6H3M15 3v6h6M21 15h-6v6M9 21v-6H3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square" stroke-linejoin="miter"/>
+      </svg>
+    `
+    : `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square" stroke-linejoin="miter"/>
+      </svg>
+    `;
+}
 
 /* =========================
    UI
@@ -232,6 +248,20 @@ function setSettingsDrawerOpen(open) {
     settingsOverlayEl.hidden = !open;
     settingsOverlayEl.classList.toggle("open", open);
   }
+}
+
+function setCanvasFocusMode(focused) {
+  if (!mainPanelEl || !toggleCanvasFocusButton) return;
+  mainPanelEl.classList.toggle("canvas-focus", focused);
+  toggleCanvasFocusButton.innerHTML = canvasFocusIcon(focused);
+  toggleCanvasFocusButton.setAttribute(
+    "aria-label",
+    focused ? "通常表示に戻す" : "キャンバスを広く表示"
+  );
+  toggleCanvasFocusButton.setAttribute(
+    "title",
+    focused ? "通常表示に戻す" : "キャンバスを広く表示"
+  );
 }
 
 function redrawCurrentView() {
@@ -3107,6 +3137,9 @@ closeSettingsButton?.addEventListener("click", () => {
 });
 settingsOverlayEl?.addEventListener("click", () => {
   setSettingsDrawerOpen(false);
+});
+toggleCanvasFocusButton?.addEventListener("click", () => {
+  setCanvasFocusMode(!mainPanelEl?.classList.contains("canvas-focus"));
 });
 addManualTurnButton?.addEventListener("click", () => {
   renderSequence([...getManualTurnNames(), "Three"]);
