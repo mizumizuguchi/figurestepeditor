@@ -91,27 +91,22 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const canvasViewportEl = document.getElementById("canvasViewport");
 const sequenceEl = document.getElementById("sequence");
-const sequenceInputEl = document.getElementById("sequenceInput");
-const copySequenceButton = document.getElementById("copySequence");
 const shareSequenceButton = document.getElementById("shareSequence");
-const clearSequenceInputButton = document.getElementById("clearSequenceInput");
 const startStateEl = document.getElementById("startState");
 const circleSizeEl = document.getElementById("circleSize");
-const manualStartStateEl = document.getElementById("manualStartState");
+const randomStartStateEl = document.getElementById("randomStartState");
+const randomCircleSizeEl = document.getElementById("randomCircleSize");
 const countEl = document.getElementById("count");
 const sCurveFixedEl = document.getElementById("sCurveFixed");
 const countDownButton = document.getElementById("countDown");
 const countUpButton = document.getElementById("countUp");
 const checkAllTurnsButton = document.getElementById("checkAllTurns");
 const clearAllTurnsButton = document.getElementById("clearAllTurns");
-const manualTurnListEl = document.getElementById("manualTurnList");
 const addManualTurnButton = document.getElementById("addManualTurn");
-const tabRandomButton = document.getElementById("tabRandom");
-const tabManualButton = document.getElementById("tabManual");
-const panelRandomEl = document.getElementById("panelRandom");
-const panelManualEl = document.getElementById("panelManual");
-const inputPanelBodyEl = document.getElementById("inputPanelBody");
-const toggleInputPanelButton = document.getElementById("toggleInputPanel");
+const toggleSettingsButton = document.getElementById("toggleSettings");
+const closeSettingsButton = document.getElementById("closeSettings");
+const settingsDrawerEl = document.getElementById("settingsDrawer");
+const settingsOverlayEl = document.getElementById("settingsOverlay");
 
 const LEFT_FOOT_COLOR = "#2aa8ff";
 const RIGHT_FOOT_COLOR = "#22c55e";
@@ -132,16 +127,12 @@ let lastConfirmedData = null;
 const ANIMATION_POINT_STEPS = 24;
 const SETTINGS_COOKIE_NAME = "stepmaker_settings";
 const SETTINGS_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-const INPUT_MODES = {
-  RANDOM: "random",
-  MANUAL: "manual",
-};
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 3.5;
-let activeInputMode = INPUT_MODES.RANDOM;
 let canvasZoom = 1;
 let pinchState = null;
 let currentCircleSize = 1;
+let dragTurnIndex = -1;
 const mixedHornTuning = {
   sameToSwitch: {
     clipOffset: 0.30,
@@ -162,16 +153,6 @@ function fillStates() {
   startStateEl.innerHTML = STATES.map(
     ([c, j]) => `<option value="${c}">${c} - ${j}</option>`
   ).join("");
-  startStateEl.insertAdjacentHTML(
-    "afterbegin",
-    `<option value="${RANDOM_START_STATE}">ランダム</option>`
-  );
-
-  if (manualStartStateEl) {
-    manualStartStateEl.innerHTML = STATES.map(
-      ([c, j]) => `<option value="${c}">${c} - ${j}</option>`
-    ).join("");
-  }
 }
 
 function getAllTurnNames() {
@@ -242,34 +223,14 @@ function getCookie(name) {
   return null;
 }
 
-function setActiveInputMode(mode) {
-  activeInputMode = mode === INPUT_MODES.MANUAL ? INPUT_MODES.MANUAL : INPUT_MODES.RANDOM;
-
-  const isRandom = activeInputMode === INPUT_MODES.RANDOM;
-  tabRandomButton?.classList.toggle("active", isRandom);
-  tabManualButton?.classList.toggle("active", !isRandom);
-
-  if (panelRandomEl) panelRandomEl.hidden = !isRandom;
-  if (panelManualEl) panelManualEl.hidden = isRandom;
-
-  if (circleSizeEl) {
-    const randomOption = circleSizeEl.querySelector(`option[value="${RANDOM_CIRCLE_SIZE}"]`);
-    if (randomOption) {
-      randomOption.hidden = !isRandom;
-    }
-    if (!isRandom && circleSizeEl.value === RANDOM_CIRCLE_SIZE) {
-      circleSizeEl.value = "1";
-      currentCircleSize = 1;
-      syncSequenceInputFromManualBuilder();
-    }
+function setSettingsDrawerOpen(open) {
+  if (!settingsDrawerEl) return;
+  settingsDrawerEl.classList.toggle("open", open);
+  settingsDrawerEl.setAttribute("aria-hidden", open ? "false" : "true");
+  if (settingsOverlayEl) {
+    settingsOverlayEl.hidden = !open;
+    settingsOverlayEl.classList.toggle("open", open);
   }
-}
-
-function setInputPanelCollapsed(collapsed) {
-  if (!inputPanelBodyEl || !toggleInputPanelButton) return;
-
-  inputPanelBodyEl.hidden = collapsed;
-  toggleInputPanelButton.textContent = collapsed ? "展開" : "折り畳み";
 }
 
 function redrawCurrentView() {
@@ -293,7 +254,7 @@ function createManualTurnSelect(turnName = "Three") {
 }
 
 function getManualTurnNames() {
-  return [...(manualTurnListEl?.querySelectorAll(".manual-turn-select") ?? [])]
+  return [...(sequenceEl?.querySelectorAll(".manual-turn-select") ?? [])]
     .map(el => el.value)
     .filter(Boolean);
 }
@@ -307,43 +268,56 @@ function buildSequenceTextFromParts(startStateCode, turnNames, circleSize = curr
   ].join("→");
 }
 
-function syncSequenceInputFromManualBuilder() {
-  if (!sequenceInputEl || !manualStartStateEl) return;
+function getPreviewStepStates(startStateCode, turnNames) {
+  if (!isEdgeCode(startStateCode)) return [];
+  const previewStates = [];
+  let state = parseStateCode(startStateCode);
 
-  const startStateCode = manualStartStateEl.value;
-  const turnNames = getManualTurnNames();
-  sequenceInputEl.value = buildSequenceTextFromParts(startStateCode, turnNames);
+  for (const turnName of turnNames) {
+    previewStates.push(cloneSkateState(state));
+    state = applyTurnState(state, turnName);
+  }
+
+  return previewStates;
 }
 
-function renderManualTurnList(turnNames = []) {
-  if (!manualTurnListEl) return;
+function renderSequence(turnNames = getManualTurnNames()) {
+  if (!sequenceEl) return;
 
   if (!turnNames.length) {
-    manualTurnListEl.innerHTML = `
-      <div class="manual-empty">ターンを追加するとここに並びます</div>
+    sequenceEl.innerHTML = `
+      <div class="turn-list-empty">ターンを追加するとここに並びます</div>
     `;
     return;
   }
 
-  manualTurnListEl.innerHTML = turnNames
-    .map(
-      (turnName, index) => `
-        <div class="manual-turn-row" data-manual-index="${index}">
+  const startStateCode = startStateEl?.value ?? STATES[0][0];
+  const previewStates = getPreviewStepStates(startStateCode, turnNames);
+
+  sequenceEl.innerHTML = turnNames
+    .map((turnName, index) => {
+      const state = previewStates[index];
+      const code = state ? stateToCode(state) : "-";
+      return `
+        <div class="turn-row sequence-step" data-sequence-index="${index}" data-manual-index="${index}" draggable="true">
+          <button class="drag-handle" type="button" tabindex="-1" aria-label="並び替え">⋮⋮</button>
+          <div class="edge-pill">(${code})</div>
           ${createManualTurnSelect(turnName)}
-          <button class="secondary mini-button manual-turn-remove" type="button">削除</button>
+          <button class="secondary remove-button manual-turn-remove" type="button">削除</button>
         </div>
-      `
-    )
+      `;
+    })
     .join("");
 }
 
-function setManualBuilder(startStateCode, turnNames) {
-  if (manualStartStateEl && isEdgeCode(startStateCode)) {
-    manualStartStateEl.value = startStateCode;
+function setEditorSequence(startStateCode, turnNames, circleSize = currentCircleSize) {
+  if (startStateEl && isEdgeCode(startStateCode)) {
+    startStateEl.value = startStateCode;
   }
-
-  renderManualTurnList(turnNames);
-  syncSequenceInputFromManualBuilder();
+  if (circleSizeEl && [1, 2, 3].includes(Number(circleSize))) {
+    circleSizeEl.value = String(circleSize);
+  }
+  renderSequence(turnNames);
 }
 
 function edgeToggleIcon(expanded) {
@@ -371,113 +345,75 @@ function fillTurnCheckboxes() {
   const el = document.getElementById("turnCheckboxes");
   if (!el) return;
 
-  const allTurns = [...new Set(Object.values(TURN_CANDIDATES).flat())];
+  const sections = [
+    {
+      label: "ターン",
+      turns: [
+        "Three",
+        "Bracket",
+        "Rocker",
+        "Counter",
+        "Loop",
+        "Mohawk",
+        "Choctaw",
+      ],
+    },
+    {
+      label: "ステップ・スケーティング",
+      turns: ["Skating", "ChangeEdge", "ChangeFoot", "ChangeFootSwitch"],
+    },
+  ];
 
-  el.innerHTML = allTurns
-    .map(
-      turn => `
-        <div
-          class="turn-filter-card"
-          data-turn="${turn}"
-          style="
-          border:1px solid #2a365f;
-          border-radius:10px;
-          background:#202643;
-          overflow:hidden;
-        ">
-          <div style="
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:2px;
-            padding:8px 10px;
-          ">
-            <label style="
-              display:flex;
-              align-items:center;
-              gap:2px;
-              min-width:0;
-              flex:1;
-              cursor:pointer;
-              font-size:12px;
-              white-space:nowrap;
-              overflow:hidden;
-              text-overflow:ellipsis;
-              padding-right:4px;
-            ">
+  const renderTurnFilterCard = turn => `
+        <div class="turn-filter-card" data-turn="${turn}">
+          <div class="turn-filter-header">
+            <label class="turn-filter-title">
               <input
                 type="checkbox"
                 class="turn-filter"
                 data-turn="${turn}"
                 checked
-                style="width:auto;"
               />
               <span>${turnLabelJP(turn)}</span>
             </label>
             <button
               type="button"
-              class="edge-toggle"
+              class="secondary edge-toggle edge-toggle-button"
               data-turn="${turn}"
               aria-expanded="false"
               aria-label="${turnLabelJP(turn)}のエッジを展開"
               title="${turnLabelJP(turn)}のエッジを展開"
-              style="
-                width:32px;
-                min-width:32px;
-                height:32px;
-                flex:0 0 32px;
-                padding:0;
-                display:grid;
-                place-items:center;
-                border-radius:999px;
-                border:1px solid #3c4b78;
-                background:#283153;
-                color:#eef3ff;
-              "
             >${edgeToggleIcon(false)}</button>
           </div>
           <div
-            class="edge-filter-panel"
+            class="edge-filter-panel turn-filter-edges"
             data-turn-panel="${turn}"
             hidden
-            style="
-              padding:0 10px 10px 34px;
-              border-top:1px solid rgba(255,255,255,0.08);
-            "
           >
-            <div style="
-              display:grid;
-              grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
-              gap:6px;
-              padding-top:10px;
-            ">
-              ${EDGE_CODES.map(
-                code => `
-                  <label style="
-                    display:flex;
-                    align-items:center;
-                    gap:2px;
-                    padding:6px 8px;
-                    border:1px solid #33416a;
-                    border-radius:8px;
-                    background:#1a213b;
-                    cursor:pointer;
-                    font-size:12px;
-                  ">
-                    <input
-                      type="checkbox"
-                      class="edge-filter"
-                      data-turn="${turn}"
-                      value="${code}"
-                      checked
-                      style="width:auto;"
-                    />
-                    <span>${code} ${STATE_LABELS[code] ?? code}</span>
-                  </label>
-                `
-              ).join("")}
-            </div>
+            ${EDGE_CODES.map(
+              code => `
+                <label class="turn-filter-edge-row">
+                  <input
+                    type="checkbox"
+                    class="edge-filter"
+                    data-turn="${turn}"
+                    value="${code}"
+                    checked
+                  />
+                  <span>${code} ${STATE_LABELS[code] ?? code}</span>
+                </label>
+              `
+            ).join("")}
           </div>
+        </div>
+      `;
+
+  el.innerHTML = sections
+    .map(
+      section => `
+        <div class="turn-filter-group">
+          <div class="turn-filter-group-label">${section.label}</div>
+          ${section.turns.map(renderTurnFilterCard).join("")}
         </div>
       `
     )
@@ -588,14 +524,12 @@ function getEnabledTurnEdgeMap() {
 
 function collectSettings() {
   return {
-    startState: startStateEl?.value ?? RANDOM_START_STATE,
-    circleSize: circleSizeEl?.value ?? RANDOM_CIRCLE_SIZE,
+    startState: startStateEl?.value ?? STATES[0][0],
+    circleSize: circleSizeEl?.value ?? "1",
     count: countEl?.value ?? "10",
     sCurveFixed: Boolean(sCurveFixedEl?.checked),
-    activeInputMode,
-    inputPanelCollapsed: inputPanelBodyEl?.hidden ?? false,
-    sequenceInput: sequenceInputEl?.value ?? "",
-    manualStartState: manualStartStateEl?.value ?? STATES[0][0],
+    randomStartState: Boolean(randomStartStateEl?.checked),
+    randomCircleSize: Boolean(randomCircleSizeEl?.checked),
     manualTurns: getManualTurnNames(),
     turnEdges: Object.fromEntries(
       [...getEnabledTurnEdgeMap().entries()].map(([turn, edges]) => [
@@ -639,7 +573,7 @@ function restoreSettingsFromCookie() {
 
     if (
       saved.startState &&
-      (isEdgeCode(saved.startState) || saved.startState === RANDOM_START_STATE)
+      isEdgeCode(saved.startState)
     ) {
       startStateEl.value = saved.startState;
     }
@@ -652,32 +586,27 @@ function restoreSettingsFromCookie() {
       sCurveFixedEl.checked = saved.sCurveFixed;
     }
 
+    if (typeof saved.randomStartState === "boolean" && randomStartStateEl) {
+      randomStartStateEl.checked = saved.randomStartState;
+    }
+
+    if (typeof saved.randomCircleSize === "boolean" && randomCircleSizeEl) {
+      randomCircleSizeEl.checked = saved.randomCircleSize;
+    }
+
     if (saved.circleSize != null && circleSizeEl) {
       const size = Number(saved.circleSize);
       if ([1, 2, 3].includes(size)) {
         circleSizeEl.value = String(size);
         currentCircleSize = size;
-      } else if (saved.circleSize === RANDOM_CIRCLE_SIZE) {
-        circleSizeEl.value = RANDOM_CIRCLE_SIZE;
       }
     }
 
-    if (typeof saved.sequenceInput === "string" && sequenceInputEl) {
-      sequenceInputEl.value = saved.sequenceInput;
-    }
-
-    if (saved.manualStartState && isEdgeCode(saved.manualStartState) && manualStartStateEl) {
-      manualStartStateEl.value = saved.manualStartState;
-    }
-
-    renderManualTurnList(
+    renderSequence(
       Array.isArray(saved.manualTurns)
         ? saved.manualTurns.filter(turnName => getAllTurnNames().includes(turnName))
         : []
     );
-
-    setActiveInputMode(saved.activeInputMode);
-    setInputPanelCollapsed(Boolean(saved.inputPanelCollapsed));
 
     applySavedTurnEdges(saved.turnEdges);
   } catch (error) {
@@ -744,10 +673,6 @@ function buildShareUrl(sequenceText) {
 async function shareCurrentSequence() {
   const text = buildSequenceText();
   if (!text) return;
-
-  if (sequenceInputEl) {
-    sequenceInputEl.value = text;
-  }
 
   const url = buildShareUrl(text);
   if (navigator.share) {
@@ -818,10 +743,6 @@ function parseSequenceText(text) {
 }
 
 function resolveStartStateCode(selectedValue) {
-  if (selectedValue === RANDOM_START_STATE) {
-    return pick(EDGE_CODES);
-  }
-
   return isEdgeCode(selectedValue) ? selectedValue : STATES[0][0];
 }
 
@@ -982,20 +903,15 @@ function parseStateCode(code) {
 function restoreSequenceFromQuery() {
   const params = new URLSearchParams(window.location.search);
   const sharedSequence = params.get("sequence");
-  if (!sharedSequence || !sequenceInputEl) return false;
+  if (!sharedSequence) return false;
 
   try {
     const parsed = parseSequenceText(sharedSequence);
-    sequenceInputEl.value = sharedSequence;
     if (circleSizeEl) {
       circleSizeEl.value = String(parsed.circleSize);
     }
     currentCircleSize = parsed.circleSize;
-    if (manualStartStateEl) {
-      manualStartStateEl.value = parsed.startStateCode;
-    }
-    setManualBuilder(parsed.startStateCode, parsed.turnNames);
-    setActiveInputMode(INPUT_MODES.MANUAL);
+    setEditorSequence(parsed.startStateCode, parsed.turnNames, parsed.circleSize);
     return true;
   } catch (error) {
     console.warn("shared sequence restore failed", error);
@@ -1449,7 +1365,7 @@ function ensureScrollableCanvas() {
 
   wrap.style.overflow = "auto";
   wrap.style.maxWidth = "100%";
-  wrap.style.maxHeight = "75vh";
+  wrap.style.maxHeight = "100%";
 }
 
 function clampCanvasZoom(value) {
@@ -2964,65 +2880,29 @@ function playAnimation() {
 /* =========================
    螳溯｡・
 ========================= */
-function confirmRun() {
-  stopAnimation();
-  currentCircleSize = resolveCircleSize(circleSizeEl?.value);
-
-  const turnCount = Math.max(
-    1,
-    Math.min(49, Number(document.getElementById("count").value) || 1)
-  );
-  let sequenceText = sequenceInputEl?.value.trim() ?? "";
-  let startState = startStateEl.value;
-
+function prepareBaseCanvas() {
   const baseRadius = FIXED_RADIUS * getCircleRadiusScale();
   canvas.width = BASE_GRID_COLS * baseRadius * 2 + GRID_PADDING * 2;
   canvas.height = BASE_GRID_ROWS * baseRadius * 2 + GRID_PADDING * 2;
   applyCanvasZoom();
   buildGrid(BASE_GRID_ROWS, BASE_GRID_COLS);
+}
 
-  try {
-    if (activeInputMode === INPUT_MODES.MANUAL) {
-      if (!sequenceText) {
-        sequenceText = buildSequenceTextFromParts(
-          manualStartStateEl?.value ?? STATES[0][0],
-          getManualTurnNames()
-        );
-        if (sequenceInputEl) {
-          sequenceInputEl.value = sequenceText;
-        }
-      }
+function finalizeSequenceRender(startStateCode, turnNames = turns) {
+  currentStartStateCode = startStateCode;
 
-      if (!sequenceText) {
-        throw new Error("じぶんでつくるにはターンを1つ以上入れてください。");
-      }
-
-      const parsed = parseSequenceText(sequenceText);
-      currentCircleSize = parsed.circleSize;
-      if (circleSizeEl) {
-        circleSizeEl.value = String(parsed.circleSize);
-      }
-      canvas.width = BASE_GRID_COLS * radius * 2 + GRID_PADDING * 2;
-      canvas.height = BASE_GRID_ROWS * radius * 2 + GRID_PADDING * 2;
-      applyCanvasZoom();
-      buildGrid(BASE_GRID_ROWS, BASE_GRID_COLS);
-      startState = parsed.startStateCode;
-      if (manualStartStateEl) {
-        manualStartStateEl.value = startState;
-      }
-      setManualBuilder(startState, parsed.turnNames);
-      buildStepInfosFromTurns(startState, parsed.turnNames);
-    } else {
-      const stepCount = turnCount + 1;
-      startState = resolveStartStateCode(startState);
-      buildStepInfos(stepCount, startState);
-    }
-  } catch (error) {
-    alert(error.message || "シークエンス入力を読み込めませんでした。");
+  if (!turnNames.length || !stepInfos.length) {
+    modes = [];
+    turns = [...turnNames];
+    stepInfos = [];
+    stepStates = [parseStateCode(startStateCode)];
+    lastConfirmedData = null;
+    resetCanvas();
+    renderSequence(turnNames);
+    highlightSequenceStep(-1);
+    saveSettingsToCookie();
     return;
   }
-
-  currentStartStateCode = startState;
 
   fitGridToContent();
 
@@ -3036,36 +2916,70 @@ function confirmRun() {
 
   drawGrid();
   drawSteps();
-  renderSequence();
+  renderSequence(turnNames);
   highlightSequenceStep(-1);
   saveSettingsToCookie();
+}
+
+function confirmRun() {
+  stopAnimation();
+  currentCircleSize = resolveCircleSize(circleSizeEl?.value);
+  const startState = resolveStartStateCode(startStateEl?.value);
+  const turnNames = getManualTurnNames();
+
+  prepareBaseCanvas();
+
+  try {
+    if (turnNames.length) {
+      buildStepInfosFromTurns(startState, turnNames);
+    } else {
+      modes = [];
+      turns = [];
+      stepInfos = [];
+      stepStates = [parseStateCode(startState)];
+    }
+  } catch (error) {
+    alert(error.message || "ターンリストを読み込めませんでした。");
+    return;
+  }
+
+  finalizeSequenceRender(startState, turnNames);
+}
+
+function generateRandomSequence() {
+  stopAnimation();
+
+  const turnCount = Math.max(1, Math.min(49, Number(countEl?.value) || 1));
+  const selectedCircleSize = randomCircleSizeEl?.checked
+    ? pick([1, 2, 3])
+    : resolveCircleSize(circleSizeEl?.value);
+  const selectedStartState = randomStartStateEl?.checked
+    ? pick(EDGE_CODES)
+    : resolveStartStateCode(startStateEl?.value);
+
+  currentCircleSize = selectedCircleSize;
+  if (circleSizeEl) {
+    circleSizeEl.value = String(selectedCircleSize);
+  }
+  if (startStateEl) {
+    startStateEl.value = selectedStartState;
+  }
+
+  prepareBaseCanvas();
+  buildStepInfos(turnCount + 1, selectedStartState);
+  setEditorSequence(selectedStartState, turns, selectedCircleSize);
+  finalizeSequenceRender(selectedStartState, turns);
 }
 
 /* =========================
    陦ｨ遉ｺ
 ========================= */
-function renderSequence() {
-  sequenceEl.innerHTML = turns
-    .map((t, i) => {
-      const s0 = stepStates[i];
-      const code = stateToCode(s0);
-      const edgeLabel = stateLabelJPFromState(s0);
-      const turnLabel = turnLabelJP(t);
-
-      return `
-        <div class="step sequence-step" data-sequence-index="${i}" style="padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.08); transition:background 140ms ease, border-color 140ms ease;">
-          <div class="step-title" style="font-weight:700;">${i + 1}. (${code})${edgeLabel} ${turnLabel}</div>
-        </div>
-      `;
-    })
-    .join("");
-}
-
 function highlightSequenceStep(index) {
+  if (!sequenceEl) return;
+
   for (const el of sequenceEl.querySelectorAll(".sequence-step")) {
     const isActive = Number(el.dataset.sequenceIndex) === index;
-    el.style.background = isActive ? "rgba(91, 134, 255, 0.22)" : "transparent";
-    el.style.borderColor = isActive ? "rgba(109, 213, 237, 0.38)" : "rgba(255,255,255,0.08)";
+    el.classList.toggle("is-active", isActive);
   }
 
   if (index < 0) return;
@@ -3074,40 +2988,29 @@ function highlightSequenceStep(index) {
   activeEl?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
-async function copyCurrentSequence() {
-  const text = buildSequenceText();
-  if (!text) {
-    alert("コピーできるシークエンスがありません。");
+function reorderTurnList(fromIndex, toIndex) {
+  const turnNames = getManualTurnNames();
+  if (
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= turnNames.length ||
+    toIndex >= turnNames.length ||
+    fromIndex === toIndex
+  ) {
     return;
   }
 
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch (error) {
-    if (sequenceInputEl) {
-      sequenceInputEl.value = text;
-      sequenceInputEl.focus();
-      sequenceInputEl.select();
-    }
-    alert("クリップボードに直接コピーできなかったので、入力欄に入れました。");
-    return;
-  }
-
-  if (sequenceInputEl) {
-    sequenceInputEl.value = text;
-  }
-  setManualBuilder(stateToCode(stepStates[0]), turns);
-  saveSettingsToCookie();
+  const [moved] = turnNames.splice(fromIndex, 1);
+  turnNames.splice(toIndex, 0, moved);
+  renderSequence(turnNames);
+  confirmRun();
 }
 
 /* =========================
    init
 ========================= */
-document.getElementById("run").addEventListener("click", confirmRun);
+document.getElementById("run").addEventListener("click", generateRandomSequence);
 document.getElementById("play").addEventListener("click", playAnimation);
-copySequenceButton?.addEventListener("click", () => {
-  copyCurrentSequence();
-});
 shareSequenceButton?.addEventListener("click", async () => {
   try {
     await shareCurrentSequence();
@@ -3115,65 +3018,73 @@ shareSequenceButton?.addEventListener("click", async () => {
     alert("共有リンクを作れませんでした。");
   }
 });
-clearSequenceInputButton?.addEventListener("click", () => {
-  if (!sequenceInputEl) return;
-  sequenceInputEl.value = "";
-  renderManualTurnList([]);
-  saveSettingsToCookie();
-});
 checkAllTurnsButton?.addEventListener("click", () => {
   setAllTurnEdges(true);
 });
 clearAllTurnsButton?.addEventListener("click", () => {
   setAllTurnEdges(false);
 });
-tabRandomButton?.addEventListener("click", () => {
-  setActiveInputMode(INPUT_MODES.RANDOM);
-  saveSettingsToCookie();
+toggleSettingsButton?.addEventListener("click", () => {
+  setSettingsDrawerOpen(!settingsDrawerEl?.classList.contains("open"));
 });
-tabManualButton?.addEventListener("click", () => {
-  setActiveInputMode(INPUT_MODES.MANUAL);
-  saveSettingsToCookie();
+closeSettingsButton?.addEventListener("click", () => {
+  setSettingsDrawerOpen(false);
 });
-toggleInputPanelButton?.addEventListener("click", () => {
-  setInputPanelCollapsed(!(inputPanelBodyEl?.hidden ?? false));
-  saveSettingsToCookie();
-});
-manualStartStateEl?.addEventListener("change", () => {
-  syncSequenceInputFromManualBuilder();
-  saveSettingsToCookie();
+settingsOverlayEl?.addEventListener("click", () => {
+  setSettingsDrawerOpen(false);
 });
 addManualTurnButton?.addEventListener("click", () => {
-  renderManualTurnList([...getManualTurnNames(), "Three"]);
-  syncSequenceInputFromManualBuilder();
-  saveSettingsToCookie();
+  renderSequence([...getManualTurnNames(), "Three"]);
+  confirmRun();
 });
-manualTurnListEl?.addEventListener("change", event => {
+sequenceEl?.addEventListener("change", event => {
   if (!event.target.classList.contains("manual-turn-select")) return;
-  syncSequenceInputFromManualBuilder();
-  saveSettingsToCookie();
+  confirmRun();
 });
-manualTurnListEl?.addEventListener("click", event => {
+sequenceEl?.addEventListener("click", event => {
   const button = event.target.closest(".manual-turn-remove");
   if (!button) return;
 
-  const row = button.closest(".manual-turn-row");
+  const row = button.closest(".turn-row");
   const index = Number(row?.dataset.manualIndex ?? -1);
   const turnNames = getManualTurnNames();
   if (index < 0 || index >= turnNames.length) return;
 
   turnNames.splice(index, 1);
-  renderManualTurnList(turnNames);
-  syncSequenceInputFromManualBuilder();
-  saveSettingsToCookie();
+  renderSequence(turnNames);
+  confirmRun();
 });
-startStateEl?.addEventListener("change", saveSettingsToCookie);
+sequenceEl?.addEventListener("dragstart", event => {
+  const row = event.target.closest(".turn-row");
+  if (!row) return;
+  dragTurnIndex = Number(row.dataset.manualIndex ?? -1);
+  event.dataTransfer.effectAllowed = "move";
+});
+sequenceEl?.addEventListener("dragover", event => {
+  const row = event.target.closest(".turn-row");
+  if (!row) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+});
+sequenceEl?.addEventListener("drop", event => {
+  const row = event.target.closest(".turn-row");
+  if (!row) return;
+  event.preventDefault();
+  const dropIndex = Number(row.dataset.manualIndex ?? -1);
+  reorderTurnList(dragTurnIndex, dropIndex);
+  dragTurnIndex = -1;
+});
+sequenceEl?.addEventListener("dragend", () => {
+  dragTurnIndex = -1;
+});
+startStateEl?.addEventListener("change", confirmRun);
 circleSizeEl?.addEventListener("change", () => {
   currentCircleSize = resolveCircleSize(circleSizeEl.value);
-  syncSequenceInputFromManualBuilder();
-  saveSettingsToCookie();
+  confirmRun();
 });
 sCurveFixedEl?.addEventListener("change", saveSettingsToCookie);
+randomStartStateEl?.addEventListener("change", saveSettingsToCookie);
+randomCircleSizeEl?.addEventListener("change", saveSettingsToCookie);
 countEl?.addEventListener("input", saveSettingsToCookie);
 countDownButton?.addEventListener("click", () => {
   changeCountBy(-1);
@@ -3181,13 +3092,11 @@ countDownButton?.addEventListener("click", () => {
 countUpButton?.addEventListener("click", () => {
   changeCountBy(1);
 });
-sequenceInputEl?.addEventListener("input", saveSettingsToCookie);
 
 fillStates();
 fillTurnCheckboxes();
-renderManualTurnList([]);
-setActiveInputMode(INPUT_MODES.RANDOM);
-setInputPanelCollapsed(false);
+renderSequence([]);
+setSettingsDrawerOpen(false);
 restoreSettingsFromCookie();
 restoreSequenceFromQuery();
 currentCircleSize = resolveCircleSize(circleSizeEl?.value);
