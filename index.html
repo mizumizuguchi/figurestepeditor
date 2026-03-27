@@ -331,16 +331,17 @@
         .canvas-area {
             position: relative;
             flex: 1 1 auto;
+            height: 0;
             min-height: 0;
-            display: flex;
             overflow: hidden;
         }
 
         .canvas-area .canvas-wrap {
-            flex: 1 1 auto;
+            position: absolute;
+            inset: 0;
             min-height: 0;
-            height: 100%;
-            max-height: 100%;
+            height: auto;
+            max-height: none;
         }
 
         .settings-drawer {
@@ -617,12 +618,12 @@
                 <div class="settings-section">
                     <div class="count-row">
                         <button id="countDown" class="secondary count-stepper" type="button">-</button>
-                        <input id="count" type="number" value="10" min="1" max="50" />
+                        <input id="count" type="number" value="5" min="1" max="50" />
                         <button id="countUp" class="secondary count-stepper" type="button">+</button>
                     </div>
 
                     <label class="check-row">
-                        <input id="sCurveFixed" type="checkbox" />
+                        <input id="sCurveFixed" type="checkbox" checked />
                         <span>S&#x5B57;&#x56FA;&#x5B9A;</span>
                     </label>
 
@@ -632,7 +633,7 @@
                     </label>
 
                     <label class="check-row">
-                        <input id="randomStartState" type="checkbox" />
+                        <input id="randomStartState" type="checkbox" checked />
                         <span>&#x958B;&#x59CB;&#x72B6;&#x614B;&#x3092;&#x30E9;&#x30F3;&#x30C0;&#x30E0;&#x306B;</span>
                     </label>
                 </div>
