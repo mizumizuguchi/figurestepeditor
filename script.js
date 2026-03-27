@@ -133,6 +133,7 @@ let canvasZoom = 1;
 let pinchState = null;
 let currentCircleSize = 1;
 let dragTurnIndex = -1;
+let pointerDragState = null;
 const mixedHornTuning = {
   sameToSwitch: {
     clipOffset: 0.30,
@@ -299,7 +300,7 @@ function renderSequence(turnNames = getManualTurnNames()) {
       const state = previewStates[index];
       const code = state ? stateToCode(state) : "-";
       return `
-        <div class="turn-row sequence-step" data-sequence-index="${index}" data-manual-index="${index}" draggable="true">
+        <div class="turn-row sequence-step" data-sequence-index="${index}" data-manual-index="${index}">
           <button class="drag-handle" type="button" tabindex="-1" aria-label="並び替え">⋮⋮</button>
           <div class="edge-pill">(${code})</div>
           ${createManualTurnSelect(turnName)}
@@ -3006,6 +3007,80 @@ function reorderTurnList(fromIndex, toIndex) {
   confirmRun();
 }
 
+function beginPointerTurnDrag(handle, event) {
+  const row = handle.closest(".turn-row");
+  const list = sequenceEl;
+  if (!row || !list) return;
+
+  const rect = row.getBoundingClientRect();
+  const placeholder = document.createElement("div");
+  placeholder.className = "turn-row-placeholder";
+  placeholder.style.height = `${Math.max(rect.height, row.offsetHeight, 57) }px`;
+
+  row.after(placeholder);
+  row.classList.add("is-dragging");
+  row.style.position = "fixed";
+  row.style.left = `${rect.left}px`;
+  row.style.top = `${rect.top}px`;
+  row.style.width = `${rect.width}px`;
+  row.style.pointerEvents = "none";
+
+  pointerDragState = {
+    pointerId: event.pointerId,
+    row,
+    list,
+    placeholder,
+    offsetY: event.clientY - rect.top,
+  };
+
+  handle.setPointerCapture?.(event.pointerId);
+  updatePointerTurnDrag(event.clientY);
+}
+
+function updatePointerTurnDrag(clientY) {
+  if (!pointerDragState) return;
+
+  const { row, placeholder, list, offsetY } = pointerDragState;
+  row.style.top = `${clientY - offsetY}px`;
+
+  const otherRows = [...list.querySelectorAll(".turn-row:not(.is-dragging)")];
+  let targetRow = null;
+  for (const candidate of otherRows) {
+    const rect = candidate.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) {
+      targetRow = candidate;
+      break;
+    }
+  }
+
+  if (targetRow) {
+    list.insertBefore(placeholder, targetRow);
+  } else {
+    list.appendChild(placeholder);
+  }
+}
+
+function endPointerTurnDrag() {
+  if (!pointerDragState) return;
+
+  const { row, placeholder } = pointerDragState;
+  placeholder.replaceWith(row);
+  row.classList.remove("is-dragging");
+  row.style.position = "";
+  row.style.left = "";
+  row.style.top = "";
+  row.style.width = "";
+  row.style.pointerEvents = "";
+
+  pointerDragState = null;
+
+  const turnNames = [...sequenceEl.querySelectorAll(".manual-turn-select")]
+    .map(el => el.value)
+    .filter(Boolean);
+  renderSequence(turnNames);
+  confirmRun();
+}
+
 /* =========================
    init
 ========================= */
@@ -3054,28 +3129,24 @@ sequenceEl?.addEventListener("click", event => {
   renderSequence(turnNames);
   confirmRun();
 });
-sequenceEl?.addEventListener("dragstart", event => {
-  const row = event.target.closest(".turn-row");
-  if (!row) return;
-  dragTurnIndex = Number(row.dataset.manualIndex ?? -1);
-  event.dataTransfer.effectAllowed = "move";
-});
-sequenceEl?.addEventListener("dragover", event => {
-  const row = event.target.closest(".turn-row");
-  if (!row) return;
+sequenceEl?.addEventListener("pointerdown", event => {
+  const handle = event.target.closest(".drag-handle");
+  if (!handle) return;
   event.preventDefault();
-  event.dataTransfer.dropEffect = "move";
+  beginPointerTurnDrag(handle, event);
 });
-sequenceEl?.addEventListener("drop", event => {
-  const row = event.target.closest(".turn-row");
-  if (!row) return;
+sequenceEl?.addEventListener("pointermove", event => {
+  if (!pointerDragState || event.pointerId !== pointerDragState.pointerId) return;
   event.preventDefault();
-  const dropIndex = Number(row.dataset.manualIndex ?? -1);
-  reorderTurnList(dragTurnIndex, dropIndex);
-  dragTurnIndex = -1;
+  updatePointerTurnDrag(event.clientY);
 });
-sequenceEl?.addEventListener("dragend", () => {
-  dragTurnIndex = -1;
+sequenceEl?.addEventListener("pointerup", event => {
+  if (!pointerDragState || event.pointerId !== pointerDragState.pointerId) return;
+  endPointerTurnDrag();
+});
+sequenceEl?.addEventListener("pointercancel", event => {
+  if (!pointerDragState || event.pointerId !== pointerDragState.pointerId) return;
+  endPointerTurnDrag();
 });
 startStateEl?.addEventListener("change", confirmRun);
 circleSizeEl?.addEventListener("change", () => {
