@@ -142,7 +142,6 @@
             border-radius: 16px;
             touch-action: pan-x pan-y;
             overscroll-behavior: contain;
-            position: relative;
         }
 
         canvas {
@@ -169,6 +168,7 @@
             justify-content: center;
             z-index: 2;
             backdrop-filter: blur(6px);
+            touch-action: manipulation;
         }
 
         .canvas-expand-button svg {
@@ -326,6 +326,19 @@
 
         .main-panel.canvas-focus .bottom-controls {
             display: none;
+        }
+
+        .canvas-area {
+            position: relative;
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+        }
+
+        .canvas-area .canvas-wrap {
+            flex: 1 1 auto;
+            min-height: 0;
+            height: 100%;
         }
 
         .settings-drawer {
@@ -555,8 +568,10 @@
                 <button id="shareSequence" class="secondary" type="button">&#x5171;&#x6709;</button>
             </div>
 
-            <div id="canvasViewport" class="canvas-wrap">
-                <canvas id="canvas" width="1000" height="1000"></canvas>
+            <div class="canvas-area">
+                <div id="canvasViewport" class="canvas-wrap">
+                    <canvas id="canvas" width="1000" height="1000"></canvas>
+                </div>
                 <button id="toggleCanvasFocus" class="canvas-expand-button" type="button" aria-label="キャンバスを広く表示" title="キャンバスを広く表示">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
