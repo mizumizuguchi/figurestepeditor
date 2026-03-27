@@ -109,6 +109,7 @@ const settingsDrawerEl = document.getElementById("settingsDrawer");
 const settingsOverlayEl = document.getElementById("settingsOverlay");
 const mainPanelEl = document.querySelector(".main-panel");
 const toggleCanvasFocusButton = document.getElementById("toggleCanvasFocus");
+let suppressCanvasFocusClick = false;
 
 const LEFT_FOOT_COLOR = "#2aa8ff";
 const RIGHT_FOOT_COLOR = "#22c55e";
@@ -3139,6 +3140,15 @@ settingsOverlayEl?.addEventListener("click", () => {
   setSettingsDrawerOpen(false);
 });
 toggleCanvasFocusButton?.addEventListener("click", () => {
+  if (suppressCanvasFocusClick) {
+    suppressCanvasFocusClick = false;
+    return;
+  }
+  setCanvasFocusMode(!mainPanelEl?.classList.contains("canvas-focus"));
+});
+toggleCanvasFocusButton?.addEventListener("pointerup", event => {
+  event.preventDefault();
+  suppressCanvasFocusClick = true;
   setCanvasFocusMode(!mainPanelEl?.classList.contains("canvas-focus"));
 });
 addManualTurnButton?.addEventListener("click", () => {
