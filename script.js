@@ -3212,11 +3212,16 @@ fillStates();
 fillTurnCheckboxes();
 renderSequence([]);
 setSettingsDrawerOpen(false);
+const hadSavedSettings = Boolean(getCookie(SETTINGS_COOKIE_NAME));
 restoreSettingsFromCookie();
-restoreSequenceFromQuery();
+const restoredFromQuery = restoreSequenceFromQuery();
 currentCircleSize = resolveCircleSize(circleSizeEl?.value);
 ensureScrollableCanvas();
 applyCanvasZoom();
 setupCanvasViewportInteractions();
-confirmRun();
+if (!hadSavedSettings && !restoredFromQuery) {
+  generateRandomSequence();
+} else {
+  confirmRun();
+}
 
