@@ -94,6 +94,7 @@ const sequenceEl = document.getElementById("sequence");
 const shareSequenceButton = document.getElementById("shareSequence");
 const startStateEl = document.getElementById("startState");
 const circleSizeEl = document.getElementById("circleSize");
+const showFootprintsAlwaysEl = document.getElementById("showFootprintsAlways");
 const randomStartStateEl = document.getElementById("randomStartState");
 const randomCircleSizeEl = document.getElementById("randomCircleSize");
 const countEl = document.getElementById("count");
@@ -149,6 +150,9 @@ const mixedHornTuning = {
     bend: 0.27,
   },
 };
+const SHOE_MARK_OUTLINE_PATH = new Path2D(
+  "m6.47-194.920901c-40.7089 2.21479-83.5735 49.5596-82.3387 129.875c1.04846 68.1944 30.4692 60.4536 33.6313 197.685c0.97253 42.206 33.7341 65.316 65.5231 62.0642c29.0462-2.97132 52.831-30.7747 44.7581-71.0587c-24.4451-121.981 4.39889-125.106 7.75948-215.514c1.78036-47.8957-23.0126-105.573-69.3332-103.053z"
+);
 
 function canvasFocusIcon(expanded) {
   return expanded
@@ -202,6 +206,11 @@ function normalizeAngle(angle) {
   while (value <= -Math.PI) value += Math.PI * 2;
   while (value > Math.PI) value -= Math.PI * 2;
   return value;
+}
+
+function lerpAngle(a, b, t) {
+  const delta = normalizeAngle(b - a);
+  return a + delta * t;
 }
 
 function getInitialPlacement(startStateCode) {
@@ -562,6 +571,7 @@ function collectSettings() {
     sCurveFixed: Boolean(sCurveFixedEl?.checked),
     randomStartState: Boolean(randomStartStateEl?.checked),
     randomCircleSize: Boolean(randomCircleSizeEl?.checked),
+    showFootprintsAlways: Boolean(showFootprintsAlwaysEl?.checked),
     manualTurns: getManualTurnNames(),
     turnEdges: Object.fromEntries(
       [...getEnabledTurnEdgeMap().entries()].map(([turn, edges]) => [
@@ -624,6 +634,10 @@ function restoreSettingsFromCookie() {
 
     if (typeof saved.randomCircleSize === "boolean" && randomCircleSizeEl) {
       randomCircleSizeEl.checked = saved.randomCircleSize;
+    }
+
+    if (typeof saved.showFootprintsAlways === "boolean" && showFootprintsAlwaysEl) {
+      showFootprintsAlwaysEl.checked = saved.showFootprintsAlways;
     }
 
     if (saved.circleSize != null && circleSizeEl) {
@@ -1911,35 +1925,149 @@ function getMarkerPose(segment, progress) {
 }
 
 function drawFootMarker(pose) {
-  const length = TURN_FEATURE_UNIT * 0.34;
-  const width = TURN_FEATURE_UNIT * 0.22;
+  const length = TURN_FEATURE_UNIT * 0.46;
+  const width = TURN_FEATURE_UNIT * 0.18;
+  const footSide = pose.state.foot === "L" ? -1 : 1;
+  const edgeSide = pose.state.edge === "O" ? 1 : -1;
+  const fbSide = pose.state.fb === "F" ? 1 : -1;
+  const leanAngle = footSide * edgeSide * fbSide * 0.14;
+  const sourceWidth = 180;
+  const sourceHeight = 390;
+  const mirrorX = pose.state.foot === "R" ? -1 : 1;
 
   ctx.save();
   ctx.translate(pose.x, pose.y);
-  ctx.rotate(pose.headingAngle);
+  ctx.rotate(pose.headingAngle + leanAngle + Math.PI / 2);
+  ctx.scale(mirrorX, 1);
+  ctx.scale(width / sourceWidth, length / sourceHeight);
 
   const color = footColor(pose.state.foot);
   ctx.fillStyle = color;
   ctx.strokeStyle = "rgba(255,255,255,0.92)";
-  ctx.lineWidth = Math.max(1.5, TURN_FEATURE_UNIT * 0.03);
+  ctx.lineWidth = Math.max(1.2, TURN_FEATURE_UNIT * 0.022) / Math.max(width / sourceWidth, 0.0001);
   ctx.shadowColor = color;
   ctx.shadowBlur = TURN_FEATURE_UNIT * 0.16;
-
-  ctx.beginPath();
-  ctx.moveTo(length * 0.68, 0);
-  ctx.lineTo(-length * 0.34, -width * 0.56);
-  ctx.lineTo(-length * 0.08, 0);
-  ctx.lineTo(-length * 0.34, width * 0.56);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(-length * 0.02, 0);
-  ctx.lineTo(length * 0.34, 0);
-  ctx.stroke();
+  ctx.fill(SHOE_MARK_OUTLINE_PATH);
+  ctx.stroke(SHOE_MARK_OUTLINE_PATH);
 
   ctx.restore();
+}
+
+function buildMarkerPoseFromSegment(segment, progress, forcedState) {
+  const point = getInterpolatedPoint(segment.points, progress);
+  const travelAngle = getTangentAngle(segment.points, progress);
+  const state = forcedState ?? getSegmentStateAtProgress(segment, progress);
+  const headingAngle = state.fb === "B" ? travelAngle + Math.PI : travelAngle;
+
+  return {
+    x: point.x,
+    y: point.y,
+    travelAngle,
+    headingAngle,
+    state,
+  };
+}
+
+function offsetPoseAlongHeading(pose, distance) {
+  if (!pose || !distance) return pose;
+
+  return {
+    ...pose,
+    x: pose.x + Math.cos(pose.headingAngle) * distance,
+    y: pose.y + Math.sin(pose.headingAngle) * distance,
+  };
+}
+
+function offsetPoseAlongTrack(pose, distance) {
+  if (!pose || !distance) return pose;
+
+  const angle = pose.travelAngle ?? pose.headingAngle;
+  return {
+    ...pose,
+    x: pose.x + Math.cos(angle) * distance,
+    y: pose.y + Math.sin(angle) * distance,
+  };
+}
+
+function offsetPosePerpendicular(pose, distance) {
+  if (!pose || !distance) return pose;
+
+  return {
+    ...pose,
+    x: pose.x + Math.cos(pose.headingAngle + Math.PI / 2) * distance,
+    y: pose.y + Math.sin(pose.headingAngle + Math.PI / 2) * distance,
+  };
+}
+
+function offsetPoseByAngle(pose, angle, distance) {
+  if (!pose || !distance) return pose;
+
+  return {
+    ...pose,
+    x: pose.x + Math.cos(angle) * distance,
+    y: pose.y + Math.sin(angle) * distance,
+  };
+}
+
+function getFootLateralAngle(pose) {
+  if (!pose) return 0;
+  return pose.headingAngle + (pose.state?.foot === "L" ? -1 : 1) * (Math.PI / 2);
+}
+
+function drawTurnFootprints(segments) {
+  if (!segments?.length || !turns?.length) return;
+
+  for (let i = 0; i < turns.length; i++) {
+    const beforeSegment = segments.find(segment => segment.type === "step" && segment.stepIndex === i);
+    const afterSegment = segments.find(segment => segment.type === "step" && segment.stepIndex === i + 1);
+    const beforeState = stepStates[i];
+    const afterState = stepStates[i + 1];
+    const turnName = turns[i];
+    if (turnName === "Skating") continue;
+
+    const shouldOffset = !["Three", "Bracket", "Loop"].includes(turnName);
+    const isMohawkLikeTurn = turnName === "Mohawk" || turnName === "Choctaw";
+    const isTrackSplitTurn =
+      isMohawkLikeTurn ||
+      turnName === "ChangeFoot" ||
+      turnName === "ChangeFootSwitch";
+    const isExtraSpreadTurn =
+      turnName === "Rocker" ||
+      turnName === "Counter" ||
+      turnName === "ChangeEdge";
+    const footprintOffset = !shouldOffset
+      ? 0
+      : isMohawkLikeTurn
+        ? TURN_FEATURE_UNIT * 0.3
+        : isTrackSplitTurn
+          ? TURN_FEATURE_UNIT * 0.24
+        : isExtraSpreadTurn
+          ? TURN_FEATURE_UNIT * 0.22
+        : TURN_FEATURE_UNIT * 0.16;
+
+    const beforePose =
+      beforeSegment?.points?.length && beforeState
+        ? buildMarkerPoseFromSegment(beforeSegment, 1, beforeState)
+        : null;
+    const afterPose =
+      afterSegment?.points?.length && afterState
+        ? buildMarkerPoseFromSegment(afterSegment, 0, afterState)
+        : null;
+
+    if (isTrackSplitTurn && beforePose && afterPose) {
+      drawFootMarker(offsetPoseAlongTrack(beforePose, -footprintOffset));
+      drawFootMarker(offsetPoseAlongTrack(afterPose, footprintOffset));
+      continue;
+    }
+
+    if (beforePose) {
+      drawFootMarker(offsetPoseAlongHeading(beforePose, -footprintOffset));
+    }
+
+    if (afterPose) {
+      drawFootMarker(offsetPoseAlongHeading(afterPose, footprintOffset));
+    }
+  }
 }
 
 function drawStartStar(point) {
@@ -2806,6 +2934,9 @@ function drawSteps() {
     drawPolylinePartial(seg.points, 1, seg.foot);
   }
   drawTurnAnnotations(segments);
+  if (showFootprintsAlwaysEl?.checked) {
+    drawTurnFootprints(segments);
+  }
   drawStartStar(segments[0]?.points?.[0]);
   drawStartStateLabel(segments[0]?.points?.[0]);
 }
@@ -2862,6 +2993,9 @@ function playAnimation() {
           drawPolylinePartial(seg.points, 1, seg.foot);
         }
         drawTurnAnnotations(segments);
+        if (showFootprintsAlwaysEl?.checked) {
+          drawTurnFootprints(segments);
+        }
         drawStartStar(segments[0]?.points?.[0]);
         drawStartStateLabel(segments[0]?.points?.[0]);
         drawFootMarker(getMarkerPose(lastSegment, 1));
@@ -2892,6 +3026,9 @@ function playAnimation() {
 
       drawPolylinePartial(segment.points, progress, segment.foot);
       drawTurnAnnotations(segments);
+      if (showFootprintsAlwaysEl?.checked) {
+        drawTurnFootprints(segments);
+      }
       drawStartStar(segments[0]?.points?.[0]);
       drawStartStateLabel(segments[0]?.points?.[0]);
       drawTurnPopup(segment, progress, segments);
@@ -3200,6 +3337,10 @@ circleSizeEl?.addEventListener("change", () => {
 sCurveFixedEl?.addEventListener("change", saveSettingsToCookie);
 randomStartStateEl?.addEventListener("change", saveSettingsToCookie);
 randomCircleSizeEl?.addEventListener("change", saveSettingsToCookie);
+showFootprintsAlwaysEl?.addEventListener("change", () => {
+  saveSettingsToCookie();
+  redrawCurrentView();
+});
 countEl?.addEventListener("input", saveSettingsToCookie);
 countDownButton?.addEventListener("click", () => {
   changeCountBy(-1);
