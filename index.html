@@ -35,6 +35,8 @@
 
         * {
             box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
         html,
@@ -91,7 +93,7 @@
         .app-shell {
             position: relative;
             height: 100%;
-            padding: 16px;
+            padding: 0;
             overflow: hidden;
         }
 
@@ -100,13 +102,13 @@
             flex-direction: column;
             gap: 12px;
             height: 100%;
-            max-width: 980px;
-            margin: 0 auto;
-            padding: 14px;
+            max-width: none;
+            margin: 0;
+            padding: 8px;
             background: var(--panel);
-            border: 1px solid var(--line);
-            border-radius: 22px;
-            box-shadow: var(--shadow);
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
             overflow: hidden;
         }
 
@@ -152,10 +154,9 @@
             border-radius: 16px;
         }
 
-        .canvas-expand-button {
+        .canvas-expand-button,
+        .canvas-play-button {
             position: absolute;
-            right: 12px;
-            bottom: 12px;
             width: 36px;
             height: 36px;
             padding: 0;
@@ -171,7 +172,18 @@
             touch-action: manipulation;
         }
 
-        .canvas-expand-button svg {
+        .canvas-expand-button {
+            right: 12px;
+            bottom: 12px;
+        }
+
+        .canvas-play-button {
+            left: 12px;
+            bottom: 12px;
+        }
+
+        .canvas-expand-button svg,
+        .canvas-play-button svg {
             width: 18px;
             height: 18px;
             display: block;
@@ -322,6 +334,10 @@
             flex-direction: column;
             gap: 12px;
             min-height: 0;
+        }
+
+        .bottom-controls.interaction-lock {
+            pointer-events: none;
         }
 
         .main-panel.canvas-focus .bottom-controls {
@@ -535,12 +551,12 @@
 
         @media (max-width: 720px) {
             .app-shell {
-                padding: 10px;
+                padding: 0;
             }
 
             .main-panel {
-                padding: 10px;
-                border-radius: 18px;
+                padding: 6px;
+                border-radius: 0;
             }
 
             .toolbar {
@@ -566,10 +582,9 @@
             <div class="toolbar">
                 <button id="toggleSettings" class="secondary icon-button" type="button" aria-label="&#x30E9;&#x30F3;&#x30C0;&#x30E0;&#x6761;&#x4EF6;&#x8A2D;&#x5B9A;">&#x2630;</button>
                 <button id="run" class="primary" type="button">&#x30E9;&#x30F3;&#x30C0;&#x30E0;&#x751F;&#x6210;</button>
-                <button id="play" class="secondary" type="button">&#x518D;&#x751F;</button>
                 <label class="check-row" style="width:auto;">
                     <input id="showFootprintsAlways" type="checkbox" />
-                    <span>&#x8DB3;&#x578B;&#x3092;&#x5E38;&#x306B;&#x8868;&#x793A;</span>
+                    <span>&#x8DB3;&#x578B;</span>
                 </label>
                 <div class="spacer"></div>
                 <button id="shareSequence" class="secondary" type="button">&#x5171;&#x6709;</button>
@@ -579,6 +594,11 @@
                 <div id="canvasViewport" class="canvas-wrap">
                     <canvas id="canvas" width="1000" height="1000"></canvas>
                 </div>
+                <button id="play" class="canvas-play-button" type="button" aria-label="&#x518D;&#x751F;" title="&#x518D;&#x751F;">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M8 6 18 12 8 18Z" fill="currentColor" />
+                    </svg>
+                </button>
                 <button id="toggleCanvasFocus" class="canvas-expand-button" type="button" aria-label="キャンバスを広く表示" title="キャンバスを広く表示">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
