@@ -110,7 +110,9 @@ const settingsDrawerEl = document.getElementById("settingsDrawer");
 const settingsOverlayEl = document.getElementById("settingsOverlay");
 const mainPanelEl = document.querySelector(".main-panel");
 const toggleCanvasFocusButton = document.getElementById("toggleCanvasFocus");
+const bottomControlsEl = document.querySelector(".bottom-controls");
 let suppressCanvasFocusClick = false;
+let bottomControlsUnlockTimer = null;
 
 const LEFT_FOOT_COLOR = "#2aa8ff";
 const RIGHT_FOOT_COLOR = "#22c55e";
@@ -272,6 +274,23 @@ function setCanvasFocusMode(focused) {
     "title",
     focused ? "通常表示に戻す" : "キャンバスを広く表示"
   );
+
+  if (!bottomControlsEl) return;
+
+  if (bottomControlsUnlockTimer) {
+    clearTimeout(bottomControlsUnlockTimer);
+    bottomControlsUnlockTimer = null;
+  }
+
+  if (!focused) {
+    bottomControlsEl.classList.add("interaction-lock");
+    bottomControlsUnlockTimer = setTimeout(() => {
+      bottomControlsEl.classList.remove("interaction-lock");
+      bottomControlsUnlockTimer = null;
+    }, 240);
+  } else {
+    bottomControlsEl.classList.remove("interaction-lock");
+  }
 }
 
 function redrawCurrentView() {
